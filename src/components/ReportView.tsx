@@ -16,12 +16,18 @@
  * - Formal engineering footer with NBC 2016 & IMAC-NV compliance certification
  */
 
-import React, { useState } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { ClimateData, ShelterDesign, SimulationResults } from '../types';
 import { ShelterVisualizer } from './ShelterVisualizer';
 import { getMaterialById } from '../data/materials';
+import { calculateBillOfQuantities, calculateShapeGeometry } from '../services/costCalculator';
+import { exportReportToPdf } from '../utils/pdfExport';
+import { evaluateGovernmentCompliance } from '../services/complianceRules';
+import { evaluateVulnerabilities } from '../services/vulnerabilityEngine';
 import {
   Printer,
+  Download,
+  Loader2,
   ArrowLeft,
   ShieldCheck,
   Building2,
@@ -72,9 +78,73 @@ export const ReportView: React.FC<ReportViewProps> = ({
   const insMat = getMaterialById(design.insulationMaterialId);
   const glazeMat = getMaterialById(design.glazingMaterialId);
 
-  // Trigger browser's native print engine (flawless A4 PDF conversion)
+  // Mathematical shape metrics & itemized Bill of Quantities
+  const shapeGeom = useMemo(() => calculateShapeGeometry(design.geometry), [design.geometry]);
+  const boq = useMemo(() => calculateBillOfQuantities(
+    design.geometry,
+    wallMat,
+    roofMat,
+    insMat,
+    glazeMat
+  ), [design.geometry, wallMat, roofMat, insMat, glazeMat]);
+
+  // Automated Rule-Based Vulnerability & Environmental Risk Assessment
+  const vulnerabilityAssessment = useMemo(() => evaluateVulnerabilities(design, climate), [design, climate]);
+  const complianceReport = useMemo(() => evaluateGovernmentCompliance(design, climate, results), [design, climate, results]);
+
+  // Direct client-side PDF export ref & states
+  const reportRef = useRef<HTMLDivElement>(null);
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
+  const [exportStatus, setExportStatus] = useState('');
+  const [exportToast, setExportToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  // Directly compile & download high-res multi-page A4 PDF file (bypasses iframe restrictions)
+  const handleExportPdf = async () => {
+    if (!reportRef.current || isExportingPdf) return;
+    setIsExportingPdf(true);
+    setExportStatus('Preparing report...');
+    setExportToast(null);
+
+    try {
+      const sanitizedRoof = design.geometry.roofType.replace(/[^a-zA-Z0-9]/g, '_');
+      const filename = `SIH26051_Shelter_Report_${design.regionId}_${sanitizedRoof}.pdf`;
+
+      const res = await exportReportToPdf(reportRef.current, {
+        filename,
+        onProgress: (msg) => setExportStatus(msg)
+      });
+
+      if (res.success) {
+        setExportToast({
+          type: 'success',
+          message: `Engineering Dossier downloaded successfully: ${filename}`
+        });
+        setTimeout(() => setExportToast(null), 5000);
+      } else {
+        setExportToast({
+          type: 'error',
+          message: res.error || 'Export failed. Please try Print Dossier.'
+        });
+      }
+    } catch (err: any) {
+      setExportToast({
+        type: 'error',
+        message: err?.message || 'Failed to generate PDF document.'
+      });
+    } finally {
+      setIsExportingPdf(false);
+      setExportStatus('');
+    }
+  };
+
+  // Trigger browser's native print engine with automatic fallback
   const handlePrint = () => {
-    window.print();
+    try {
+      window.print();
+    } catch (err) {
+      console.warn('Native window.print() was blocked or failed, falling back to direct PDF compilation:', err);
+      handleExportPdf();
+    }
   };
 
   // Prepare Recharts 24-hour diurnal thermal curve dataset
@@ -132,20 +202,57 @@ export const ReportView: React.FC<ReportViewProps> = ({
           <span>Back to Design Studio</span>
         </button>
 
-        <div className="flex items-center gap-3">
-          <div className="hidden sm:block text-right">
-            <div className="text-xs font-bold text-slate-800">A4 Printable Engineering Dossier</div>
-            <div className="text-[11px] text-slate-500 font-mono">Form-Factor: Standard A4 Portrait (210 × 297 mm)</div>
+        {/* Export Notification Toast */}
+        {exportToast && (
+          <div
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-2 border transition-all ${
+              exportToast.type === 'success'
+                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                : 'bg-red-50 text-red-800 border-red-200'
+            }`}
+          >
+            {exportToast.type === 'success' ? (
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+            ) : (
+              <AlertTriangle className="w-3.5 h-3.5 text-red-600 shrink-0" />
+            )}
+            <span>{exportToast.message}</span>
+          </div>
+        )}
+
+        <div className="flex items-center gap-2.5">
+          <div className="hidden lg:block text-right mr-1">
+            <div className="text-xs font-bold text-slate-800">A4 Engineering Dossier</div>
+            <div className="text-[10px] text-slate-500 font-mono">210 × 297 mm Multi-Page Ready</div>
           </div>
 
+          {/* Primary Action: Direct Client-Side A4 PDF Download */}
+          <button
+            type="button"
+            onClick={handleExportPdf}
+            disabled={isExportingPdf}
+            id="save-pdf-button"
+            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 disabled:bg-emerald-500 text-white rounded-lg text-xs font-bold flex items-center gap-2 shadow-sm hover:shadow transition-all cursor-pointer"
+            title="Directly compile and download multi-page A4 PDF file (works in all browsers & iframes)"
+          >
+            {isExportingPdf ? (
+              <Loader2 className="w-4 h-4 text-white animate-spin" />
+            ) : (
+              <Download className="w-4 h-4 text-white" />
+            )}
+            <span>{isExportingPdf ? (exportStatus || 'Compiling PDF...') : 'Save as PDF (.pdf)'}</span>
+          </button>
+
+          {/* Secondary Action: Browser Native Print Dialog */}
           <button
             type="button"
             onClick={handlePrint}
             id="print-report-button"
-            className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg text-xs font-bold flex items-center gap-2 shadow-md hover:shadow-lg transition-all cursor-pointer"
+            className="px-4 py-2 bg-slate-900 hover:bg-slate-800 active:bg-slate-950 text-white rounded-lg text-xs font-bold flex items-center gap-2 shadow-sm hover:shadow transition-all cursor-pointer"
+            title="Open standard browser print dialog"
           >
             <Printer className="w-4 h-4 text-white" />
-            <span>Print / Save as PDF</span>
+            <span>Print Dossier</span>
           </button>
         </div>
       </div>
@@ -153,12 +260,16 @@ export const ReportView: React.FC<ReportViewProps> = ({
       {/* ========================================================================= */}
       {/* 2. PRINTABLE A4 ENGINEERING DOSSIER CONTAINER                             */}
       {/* ========================================================================= */}
-      <div className="print-page bg-white border border-slate-200 rounded-xl p-6 sm:p-10 shadow-sm text-slate-900 space-y-6 print:border-none print:shadow-none print:p-0 print:m-0 print:space-y-4 font-sans">
+      <div
+        id="printable-dossier"
+        ref={reportRef}
+        className="print-page bg-white border border-slate-200 rounded-xl p-6 sm:p-10 shadow-sm text-slate-900 space-y-6 print:border-none print:shadow-none print:p-0 print:m-0 print:space-y-4 font-sans"
+      >
         
         {/* ======================================================================= */}
         {/* A. FORMAL ENGINEERING REPORT HEADER (Required in Prompt)                 */}
         {/* ======================================================================= */}
-        <header className="border-b-2 border-slate-900 pb-4 space-y-3 print:break-inside-avoid">
+        <header className="report-header border-b-2 border-slate-900 pb-4 space-y-3 print:break-inside-avoid">
           {/* Top Identifier & Regulation Banner */}
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-2">
             <div className="flex items-center gap-2">
@@ -569,72 +680,104 @@ export const ReportView: React.FC<ReportViewProps> = ({
         </section>
 
         {/* ======================================================================= */}
-        {/* F. SECTION 4: ENVELOPE MATERIALS & THERMODYNAMIC SPECIFICATIONS TABLE   */}
+        {/* F. SECTION 4: ARCHITECTURAL GEOMETRY & ITEMIZED BILL OF QUANTITIES (BOQ) */}
         {/* ======================================================================= */}
-        <section className="print:break-inside-avoid space-y-2">
+        <section className="print:break-inside-avoid space-y-3">
           <div className="flex items-center justify-between border-b border-slate-200 pb-1.5">
             <h2 className="text-xs sm:text-sm font-bold uppercase tracking-wider text-slate-900 flex items-center gap-2">
               <FileCheck className="w-4 h-4 text-blue-600" />
-              <span>4. Building Envelope Bill of Materials & Thermodynamic Properties (NBC 2016 / SP 41)</span>
+              <span>4. Architectural Geometry & Itemized Bill of Quantities (BOQ) with Embodied Carbon</span>
             </h2>
-            <span className="text-[11px] font-mono text-slate-500">IS 3792 / ECBC Compliant</span>
+            <span className="text-[11px] font-mono text-slate-500">CPWD / NBC 2016 Rates</span>
           </div>
 
+          {/* 4.1 Shape Geometric Solver Summary */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2 bg-slate-50 print:bg-slate-50/70 p-2.5 rounded-lg border border-slate-200 font-mono text-xs">
+            <div>
+              <div className="text-[10px] text-slate-500 uppercase">Base Form</div>
+              <div className="font-bold text-slate-900 capitalize text-xs mt-0.5">{shapeGeom.shape.replace(/_/g, ' ')}</div>
+            </div>
+            <div>
+              <div className="text-[10px] text-slate-500 uppercase">Floor Area</div>
+              <div className="font-bold text-slate-900 text-xs mt-0.5">{shapeGeom.floorAreaM2} m²</div>
+            </div>
+            <div>
+              <div className="text-[10px] text-slate-500 uppercase">Net Wall Area</div>
+              <div className="font-bold text-slate-900 text-xs mt-0.5">{shapeGeom.netWallAreaM2} m²</div>
+            </div>
+            <div>
+              <div className="text-[10px] text-slate-500 uppercase">Roof Area</div>
+              <div className="font-bold text-slate-900 text-xs mt-0.5">{shapeGeom.roofAreaM2} m²</div>
+            </div>
+            <div>
+              <div className="text-[10px] text-slate-500 uppercase">Internal Volume</div>
+              <div className="font-bold text-slate-900 text-xs mt-0.5">{shapeGeom.internalVolumeM3} m³</div>
+            </div>
+            <div>
+              <div className="text-[10px] text-slate-500 uppercase">S/V Ratio</div>
+              <div className="font-bold text-sky-700 text-xs mt-0.5">{shapeGeom.surfaceAreaToVolumeRatio} m⁻¹</div>
+            </div>
+          </div>
+
+          {/* 4.2 Itemized BOQ Table */}
           <div className="overflow-x-auto border border-slate-200 rounded-lg print:border-slate-300">
             <table className="w-full text-left text-xs border-collapse font-mono">
               <thead className="bg-slate-100 text-slate-700 text-[10px] uppercase font-bold border-b border-slate-200">
                 <tr>
-                  <th className="p-2 border-r border-slate-200">Building Element</th>
-                  <th className="p-2 border-r border-slate-200">Material Specification</th>
-                  <th className="p-2 border-r border-slate-200 text-right">Thickness</th>
-                  <th className="p-2 border-r border-slate-200 text-right">Conductivity (k)</th>
-                  <th className="p-2 border-r border-slate-200 text-right font-bold text-slate-900">U-Value</th>
-                  <th className="p-2 border-r border-slate-200 text-right">Carbon (kg/m²)</th>
-                  <th className="p-2 text-right">Rate (₹/m²)</th>
+                  <th className="p-2 border-r border-slate-200">Item Description</th>
+                  <th className="p-2 border-r border-slate-200 text-center">Unit</th>
+                  <th className="p-2 border-r border-slate-200 text-right">Quantity</th>
+                  <th className="p-2 border-r border-slate-200 text-right">Rate (₹)</th>
+                  <th className="p-2 border-r border-slate-200 text-right font-bold text-slate-900">Amount (₹)</th>
+                  <th className="p-2 text-right">Embodied CO₂ (kg)</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200 text-[11px]">
-                <tr>
-                  <td className="p-2 border-r border-slate-200 font-bold">External Wall Core</td>
-                  <td className="p-2 border-r border-slate-200">{wallMat.name}</td>
-                  <td className="p-2 border-r border-slate-200 text-right">{design.geometry.wallThicknessMm} mm</td>
-                  <td className="p-2 border-r border-slate-200 text-right">{wallMat.thermalConductivityK} W/m·K</td>
-                  <td className="p-2 border-r border-slate-200 text-right font-bold text-blue-700">{results.compositeWallUValue} W/m²·K</td>
-                  <td className="p-2 border-r border-slate-200 text-right text-slate-600">{wallMat.embodiedCarbonKgCo2PerM2}</td>
-                  <td className="p-2 text-right">₹{wallMat.costPerSquareMeterINR}</td>
-                </tr>
-
-                <tr>
-                  <td className="p-2 border-r border-slate-200 font-bold">Roof Assembly</td>
-                  <td className="p-2 border-r border-slate-200">{roofMat.name} ({design.geometry.roofType})</td>
-                  <td className="p-2 border-r border-slate-200 text-right">{(roofMat.typicalThicknessMeters * 1000).toFixed(0)} mm</td>
-                  <td className="p-2 border-r border-slate-200 text-right">{roofMat.thermalConductivityK} W/m·K</td>
-                  <td className="p-2 border-r border-slate-200 text-right font-bold text-blue-700">{results.compositeRoofUValue} W/m²·K</td>
-                  <td className="p-2 border-r border-slate-200 text-right text-slate-600">{roofMat.embodiedCarbonKgCo2PerM2}</td>
-                  <td className="p-2 text-right">₹{roofMat.costPerSquareMeterINR}</td>
-                </tr>
-
-                <tr>
-                  <td className="p-2 border-r border-slate-200 font-bold">Thermal Insulation</td>
-                  <td className="p-2 border-r border-slate-200">{insMat.name}</td>
-                  <td className="p-2 border-r border-slate-200 text-right">{design.geometry.insulationThicknessMm} mm</td>
-                  <td className="p-2 border-r border-slate-200 text-right">{insMat.thermalConductivityK} W/m·K</td>
-                  <td className="p-2 border-r border-slate-200 text-right font-bold text-slate-500">—</td>
-                  <td className="p-2 border-r border-slate-200 text-right text-slate-600">{insMat.embodiedCarbonKgCo2PerM2}</td>
-                  <td className="p-2 text-right">₹{insMat.costPerSquareMeterINR}</td>
-                </tr>
-
-                <tr>
-                  <td className="p-2 border-r border-slate-200 font-bold">Fenestration / Glazing</td>
-                  <td className="p-2 border-r border-slate-200">{glazeMat.name} (WWR {design.geometry.windowToWallRatioPercent}%)</td>
-                  <td className="p-2 border-r border-slate-200 text-right">Standard Frame</td>
-                  <td className="p-2 border-r border-slate-200 text-right">{glazeMat.thermalConductivityK} W/m·K</td>
-                  <td className="p-2 border-r border-slate-200 text-right font-bold text-blue-700">{results.windowUValue} W/m²·K</td>
-                  <td className="p-2 border-r border-slate-200 text-right text-slate-600">{glazeMat.embodiedCarbonKgCo2PerM2}</td>
-                  <td className="p-2 text-right">₹{glazeMat.costPerSquareMeterINR}</td>
+                {boq.items.map((it) => (
+                  <tr key={it.id} className="hover:bg-slate-50">
+                    <td className="p-2 border-r border-slate-200 font-medium">
+                      {it.description}
+                    </td>
+                    <td className="p-2 border-r border-slate-200 text-center text-slate-500">
+                      {it.unit}
+                    </td>
+                    <td className="p-2 border-r border-slate-200 text-right">
+                      {it.quantity.toFixed(1)}
+                    </td>
+                    <td className="p-2 border-r border-slate-200 text-right text-slate-600">
+                      ₹{it.rateINR.toLocaleString('en-IN')}
+                    </td>
+                    <td className="p-2 border-r border-slate-200 text-right font-bold text-slate-900">
+                      ₹{it.amountINR.toLocaleString('en-IN')}
+                    </td>
+                    <td className="p-2 text-right text-emerald-800 font-medium">
+                      {it.totalCarbonKg.toLocaleString('en-IN')} kg
+                    </td>
+                  </tr>
+                ))}
+                {/* BOQ Summary Totals Row */}
+                <tr className="bg-slate-100/90 font-bold border-t-2 border-slate-300 text-xs">
+                  <td colSpan={4} className="p-2.5 border-r border-slate-200 text-right uppercase tracking-wider text-slate-800">
+                    Total Estimated Capital Cost & Embodied Carbon:
+                  </td>
+                  <td className="p-2.5 border-r border-slate-200 text-right text-blue-900 font-bold text-sm">
+                    ₹{boq.totalCostINR.toLocaleString('en-IN')}
+                  </td>
+                  <td className="p-2.5 text-right text-emerald-900 font-bold text-sm">
+                    {boq.totalEmbodiedCarbonKg.toLocaleString('en-IN')} kg CO₂e
+                  </td>
                 </tr>
               </tbody>
             </table>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] font-mono text-slate-500 px-1">
+            <div>
+              *Cost Index: ₹{boq.costPerFloorAreaINR.toLocaleString('en-IN')}/m² floor area • Carbon Intensity: {boq.carbonPerFloorAreaKg} kg CO₂e/m²
+            </div>
+            <div>
+              *Wall U-Value: {results.compositeWallUValue} W/m²·K • Roof U-Value: {results.compositeRoofUValue} W/m²·K (IS 3792 / ECBC)
+            </div>
           </div>
         </section>
 
@@ -664,6 +807,67 @@ export const ReportView: React.FC<ReportViewProps> = ({
         </section>
 
         {/* ======================================================================= */}
+        {/* G1. SECTION 5.1: STATUTORY INDIAN GOVERNMENT STANDARDS AUDIT (ECBC/NDMA/IMAC) */}
+        {/* ======================================================================= */}
+        <section className="print:break-inside-avoid space-y-2.5 text-xs">
+          <div className="border-b border-slate-200 pb-1 flex items-center justify-between">
+            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-900 flex items-center gap-1.5">
+              <ShieldCheck className="w-3.5 h-3.5 text-blue-600" />
+              <span>5.1 Indian Government Standards Compliance Audit (ECBC • NDMA • IMAC • NBC)</span>
+            </h2>
+            <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded ${
+              complianceReport.isFullyCompliant
+                ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                : 'bg-red-100 text-red-800 border border-red-300'
+            }`}>
+              {complianceReport.isFullyCompliant ? '100% CODE COMPLIANT' : `${complianceReport.violationCount} VIOLATIONS`}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {complianceReport.items.map((item) => {
+              const isViolated = item.severity === 'violation';
+              const isDeviation = item.severity === 'deviation';
+              const isPassed = item.severity === 'compliant';
+
+              return (
+                <div
+                  key={item.id}
+                  className={`p-2.5 rounded border text-[11px] space-y-1 ${
+                    isViolated
+                      ? 'bg-red-50/70 border-red-300 text-red-950'
+                      : isDeviation
+                      ? 'bg-amber-50/70 border-amber-300 text-amber-950'
+                      : 'bg-emerald-50/70 border-emerald-300 text-emerald-950'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-1 font-mono text-[10px]">
+                    <span className="font-bold flex items-center gap-1">
+                      <span className={`w-2 h-2 rounded-full ${isViolated ? 'bg-red-600' : isDeviation ? 'bg-amber-500' : 'bg-emerald-600'}`} />
+                      {item.authority} • {item.code}
+                    </span>
+                    <span className={`font-bold px-1.5 py-0.2 rounded uppercase text-[9px] ${
+                      isViolated ? 'bg-red-200 text-red-900' : isDeviation ? 'bg-amber-200 text-amber-900' : 'bg-emerald-200 text-emerald-900'
+                    }`}>
+                      {item.severity}
+                    </span>
+                  </div>
+                  <div className="font-bold text-xs">
+                    {item.title}
+                  </div>
+                  <div className="text-[10px] text-slate-600 leading-tight">
+                    {item.message}
+                  </div>
+                  <div className="text-[9px] font-mono text-slate-500 pt-0.5 border-t border-slate-200/60 flex justify-between">
+                    <span>Limit: {item.legalLimit}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+
+        {/* ======================================================================= */}
         {/* H. SECTION 6: ARCHITECTURAL FINDINGS & CLIMATE-SPECIFIC OBSERVATIONS   */}
         {/* ======================================================================= */}
         <section className="print:break-inside-avoid space-y-2 text-xs">
@@ -683,7 +887,7 @@ export const ReportView: React.FC<ReportViewProps> = ({
         {/* ======================================================================= */}
         {/* I. FORMAL ENGINEERING REPORT FOOTER (Required in Prompt)                 */}
         {/* ======================================================================= */}
-        <footer className="pt-4 border-t-2 border-slate-900 flex flex-wrap items-center justify-between gap-3 text-[10px] text-slate-500 font-mono print:break-inside-avoid">
+        <footer className="report-footer pt-4 border-t-2 border-slate-900 flex flex-wrap items-center justify-between gap-3 text-[10px] text-slate-500 font-mono print:break-inside-avoid">
           <div>
             <div className="font-bold text-slate-800">
               SIH26051: Area-Specific Shelter Thermal Report • Generated by: Team CODE TITANS

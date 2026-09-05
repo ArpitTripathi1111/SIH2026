@@ -14,17 +14,31 @@ export type ClimateZoneType = 'cold_arid' | 'hot_dry' | 'warm_humid' | 'composit
 
 export type RegionId = 'mountain' | 'desert' | 'river';
 
-export type ArchitecturalShape = 'flat_box' | 'pitched_a_frame' | 'vaulted_dome' | 'lean_to';
+export type ArchitecturalShape =
+  | 'standard_cuboid'
+  | 'a_frame_pitched'
+  | 'gabled_cuboid'
+  | 'dome_vaulted'
+  | 'cylindrical_yurt'
+  | 'hexagonal_pod'
+  | 'lean_to_sloped'
+  | 'butterfly_roof'
+  // Legacy aliases
+  | 'flat_box'
+  | 'pitched_a_frame'
+  | 'vaulted_dome'
+  | 'lean_to';
 
 export interface ArchitecturalShapeDef {
   id: ArchitecturalShape;
   name: string;
   tagline: string;
   description: string;
+  bestFor: string; // e.g. "Best For: Desert"
   recommendedRegion: RegionId;
   roofTypeEquivalent: RoofType;
   defaultPitchDegrees: number;
-  svRatioCharacteristic: 'baseline' | 'moderate' | 'minimal' | 'compact';
+  svRatioCharacteristic: 'baseline' | 'moderate' | 'minimal' | 'compact' | 'aerodynamic' | 'optimized';
   svRatioDescription: string;
   structuralAdvantage: string;
 }

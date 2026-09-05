@@ -17,6 +17,8 @@ import { SavedDesigns } from './components/SavedDesigns';
 import { ReportView } from './components/ReportView';
 import { LocationSelector } from './components/LocationSelector';
 import { ClimateController } from './components/ClimateController';
+import { ComplianceEngine } from './components/ComplianceEngine';
+import { RiskAnalyzer } from './components/RiskAnalyzer';
 import { ClimateData, RegionId, ShelterDesign } from './types';
 import { DEFAULT_CLIMATES } from './data/defaultClimates';
 import { createDefaultDesignForRegion } from './services/storageService';
@@ -148,6 +150,14 @@ export default function App() {
               onDesignChange={setDesign}
             />
 
+            {/* Statutory Indian Government Standards Compliance Engine (ECBC • NDMA • IMAC • NBC) */}
+            <ComplianceEngine
+              design={design}
+              climate={climate}
+              simulation={simulationResults}
+              onApplyFix={setDesign}
+            />
+
             {/* THREE DISTINCT INTERACTION ZONES */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {/* Interaction Zone 1: Location Selection */}
@@ -192,6 +202,14 @@ export default function App() {
 
         {activeTab === 'dashboard' && (
           <div className="space-y-6">
+            {/* Statutory Indian Government Standards Compliance Engine (ECBC • NDMA • IMAC • NBC) */}
+            <ComplianceEngine
+              design={design}
+              climate={climate}
+              simulation={simulationResults}
+              onApplyFix={setDesign}
+            />
+
             {/* Multi-Criteria Automated Optimizations */}
             <OptimizationCards
               currentDesign={design}

@@ -12,7 +12,8 @@
 @media print {
   /* Automatically hide website navigation, buttons, and interactive widgets */
   nav,
-  header,
+  header.site-header,
+  header.sticky,
   footer.no-print,
   .no-print,
   button,
@@ -20,6 +21,15 @@
   input[type="range"],
   [role="slider"] {
     display: none !important;
+  }
+
+  /* Ensure formal engineering report header and footer are strictly visible */
+  .report-header,
+  .report-footer,
+  header.report-header,
+  footer.report-footer {
+    display: block !important;
+    visibility: visible !important;
   }
 
   /* Reset layout to clean white background with sharp, dark text */

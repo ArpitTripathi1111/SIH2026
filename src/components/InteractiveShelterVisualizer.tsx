@@ -23,6 +23,7 @@ import { getMaterialById } from '../data/materials';
 import { runThermalSimulation } from '../services/thermalEngine';
 import { calculateShapeGeometry, resolveArchitecturalShape } from '../services/costCalculator';
 import { ShapeSelector } from './ShapeSelector';
+import { Shelter3D } from './Shelter3D';
 import {
   Sun,
   Wind,
@@ -40,8 +41,13 @@ import {
   Info,
   Square,
   Triangle,
-  Layers
+  Layers,
+  Rotate3d,
+  Compass,
+  Box
 } from 'lucide-react';
+
+export type VisualizerViewMode = 'front' | 'side' | 'top' | '3d';
 
 export interface InteractiveShelterVisualizerProps {
   design?: ShelterDesign;
@@ -50,6 +56,7 @@ export interface InteractiveShelterVisualizerProps {
   onDesignChange?: (updatedDesign: ShelterDesign) => void;
   initialRegion?: RegionId;
   readOnlyControls?: boolean;
+  initialViewMode?: VisualizerViewMode;
 }
 
 export const InteractiveShelterVisualizer: React.FC<InteractiveShelterVisualizerProps> = ({
@@ -58,8 +65,11 @@ export const InteractiveShelterVisualizer: React.FC<InteractiveShelterVisualizer
   results: externalResults,
   onDesignChange,
   initialRegion = 'mountain',
-  readOnlyControls = false
+  readOnlyControls = false,
+  initialViewMode = 'front'
 }) => {
+  // Current active view mode: Front View (2D), Side View (2D), Top View (2D), or 3D Interactive
+  const [viewMode, setViewMode] = useState<VisualizerViewMode>(initialViewMode);
   // Current active regional fallback archetype
   const [activeRegion, setActiveRegion] = useState<RegionId>(() => {
     const rId = externalDesign?.regionId || externalClimate?.regionId || initialRegion;
@@ -412,15 +422,21 @@ export const InteractiveShelterVisualizer: React.FC<InteractiveShelterVisualizer
   }, [activeGeometry, architecturalShape]);
 
   // Shape classification flags
-  const isLeanTo = architecturalShape === 'lean_to';
-  const isVaulted = architecturalShape === 'vaulted_dome' || roofType === 'vaulted';
-  const isPitched = architecturalShape === 'pitched_a_frame' || roofType === 'pitched' || roofType === 'ventilated_cavity';
-  const isFlat = architecturalShape === 'flat_box' || (roofType === 'flat' && !isLeanTo && !isVaulted && !isPitched);
+  const resolvedShape = resolveArchitecturalShape({ ...activeGeometry, architecturalShape });
+  const isLeanTo = resolvedShape === 'lean_to_sloped';
+  const isVaulted = resolvedShape === 'dome_vaulted' || roofType === 'vaulted';
+  const isAFrame = resolvedShape === 'a_frame_pitched';
+  const isGabled = resolvedShape === 'gabled_cuboid';
+  const isYurt = resolvedShape === 'cylindrical_yurt';
+  const isHexPod = resolvedShape === 'hexagonal_pod';
+  const isButterfly = resolvedShape === 'butterfly_roof';
+  const isPitched = isAFrame || isGabled || isYurt || isHexPod || roofType === 'pitched' || roofType === 'ventilated_cavity';
+  const isFlat = resolvedShape === 'standard_cuboid' || (!isLeanTo && !isVaulted && !isPitched && !isButterfly && !isYurt && !isHexPod);
 
   // Lean-to mono-pitch: left wall is high (windward), right wall is low (leeward)
   const leanToOffset = isLeanTo ? 32 : 0;
-  const leftWallTopY = isLeanTo ? effectiveWallTopY - leanToOffset : effectiveWallTopY;
-  const rightWallTopY = isLeanTo ? effectiveWallTopY + leanToOffset : effectiveWallTopY;
+  const leftWallTopY = isLeanTo ? effectiveWallTopY - leanToOffset : isButterfly ? effectiveWallTopY - 24 : effectiveWallTopY;
+  const rightWallTopY = isLeanTo ? effectiveWallTopY + leanToOffset : isButterfly ? effectiveWallTopY - 24 : effectiveWallTopY;
 
   // Vaulted Dome knee wall and arch rise
   const kneeWallHeightUnits = isVaulted ? buildingHeightUnits * 0.42 : buildingHeightUnits;
@@ -448,6 +464,8 @@ export const InteractiveShelterVisualizer: React.FC<InteractiveShelterVisualizer
     ? (vaultArchRiseUnits / scale).toFixed(2)
     : isLeanTo
     ? ((leanToOffset * 2) / scale).toFixed(2)
+    : isButterfly
+    ? '0.85'
     : '0.45';
 
   // Solar angle based on climate latitude/region
@@ -468,6 +486,32 @@ export const InteractiveShelterVisualizer: React.FC<InteractiveShelterVisualizer
   const indoorDisplayTemp = Number.isFinite(effectiveResults?.averageIndoorTempC)
     ? effectiveResults.averageIndoorTempC
     : (Number.isFinite(outdoorDisplayTemp) ? outdoorDisplayTemp - 2.5 : 24.0);
+
+  // ==========================================
+  // SIDE VIEW (2D ELEVATION) PARAMETRIC GEOMETRY
+  // ==========================================
+  const sideDepthUnits = Math.max(280, Math.min(520, activeGeometry.lengthMeters * scale * 0.85));
+  const sideStartX = (svgWidth - sideDepthUnits) / 2;
+  const sideEndX = sideStartX + sideDepthUnits;
+  const sideWindowW = Math.min(140, Math.max(60, sideDepthUnits * wwrRatio * 0.85));
+  const sideWindowH = windowHeightUnits;
+  const sideWindowX = sideStartX + (sideDepthUnits - sideWindowW) / 2;
+
+  // ==========================================
+  // TOP VIEW (2D PLAN & ROOF) PARAMETRIC GEOMETRY
+  // ==========================================
+  const planLengthUnits = Math.max(260, Math.min(480, activeGeometry.lengthMeters * 54));
+  const planWidthUnits = Math.max(180, Math.min(320, activeGeometry.widthMeters * 54));
+  const planCenterX = svgWidth / 2;
+  const planCenterY = svgHeight / 2;
+  const planStartX = planCenterX - planLengthUnits / 2;
+  const planStartY = planCenterY - planWidthUnits / 2;
+  const planEndX = planStartX + planLengthUnits;
+  const planEndY = planStartY + planWidthUnits;
+  const planWallThickUnits = Math.max(10, Math.min(44, (wallThicknessMm / 1000) * 54));
+  const planOverhangUnits = Math.max(12, overhangDepthM * 54 * 0.75);
+  const planDoorW = Math.min(48, planLengthUnits * 0.16);
+  const planWindowW = Math.min(120, Math.max(50, planLengthUnits * wwrRatio * 1.4));
 
   const compliancePercent = Number.isFinite(effectiveResults?.percentComfortCompliance80)
     ? effectiveResults.percentComfortCompliance80
@@ -616,52 +660,137 @@ export const InteractiveShelterVisualizer: React.FC<InteractiveShelterVisualizer
         </div>
       )}
 
-      {/* SVG CAD STAGE: REAL-TIME VECTOR DRAWING */}
-      <div className="relative w-full aspect-[16/9] max-h-[480px] bg-[#0b1220] flex items-center justify-center p-2 overflow-hidden border-b border-slate-800">
-        <svg
-          viewBox={`0 0 ${svgWidth} ${svgHeight}`}
-          className="w-full h-full select-none"
-          style={{ fontVariantNumeric: 'tabular-nums' }}
-        >
-          <defs>
-            {/* Precision CAD Drafting Grid */}
-            <pattern id="cadGrid" width="20" height="20" patternUnits="userSpaceOnUse">
-              <path d="M 20 0 L 0 0 0 20" fill="none" stroke="rgba(56, 189, 248, 0.05)" strokeWidth="1" />
-            </pattern>
-            <pattern id="cadMajorGrid" width="100" height="100" patternUnits="userSpaceOnUse">
-              <rect width="100" height="100" fill="url(#cadGrid)" />
-              <path d="M 100 0 L 0 0 0 100" fill="none" stroke="rgba(56, 189, 248, 0.12)" strokeWidth="1" />
-            </pattern>
+      {/* ========================================================================= */}
+      {/* VIEW SELECTOR UI (MULTI-VIEW 2D ORTHOGRAPHIC + 3D INTERACTIVE)            */}
+      {/* ========================================================================= */}
+      <div className="no-print print:hidden bg-slate-900/95 px-4 py-2.5 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-lg border border-slate-800 shadow-inner">
+          <button
+            type="button"
+            onClick={() => setViewMode('front')}
+            className={`px-3 py-1.5 rounded text-xs font-medium flex items-center gap-2 transition-all ${
+              viewMode === 'front'
+                ? 'bg-blue-600 text-white shadow-sm font-semibold'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+            }`}
+          >
+            <Eye className="w-3.5 h-3.5" />
+            <span>Front View (2D)</span>
+          </button>
 
-            {/* Masonry Cross-Hatching */}
-            <pattern id="masonryHatch" width="12" height="12" patternTransform="rotate(45 0 0)" patternUnits="userSpaceOnUse">
-              <line x1="0" y1="0" x2="0" y2="12" stroke="#64748b" strokeWidth="1.2" />
-            </pattern>
+          <button
+            type="button"
+            onClick={() => setViewMode('side')}
+            className={`px-3 py-1.5 rounded text-xs font-medium flex items-center gap-2 transition-all ${
+              viewMode === 'side'
+                ? 'bg-blue-600 text-white shadow-sm font-semibold'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+            }`}
+          >
+            <Layers className="w-3.5 h-3.5" />
+            <span>Side View (2D)</span>
+          </button>
 
-            {/* Continuous Insulation Batt Hatching */}
-            <pattern id="insulationPattern" width="10" height="8" patternUnits="userSpaceOnUse">
-              <path d="M 0 4 Q 2.5 0, 5 4 T 10 4" fill="none" stroke="#f59e0b" strokeWidth="1.2" />
-            </pattern>
+          <button
+            type="button"
+            onClick={() => setViewMode('top')}
+            className={`px-3 py-1.5 rounded text-xs font-medium flex items-center gap-2 transition-all ${
+              viewMode === 'top'
+                ? 'bg-blue-600 text-white shadow-sm font-semibold'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+            }`}
+          >
+            <Square className="w-3.5 h-3.5" />
+            <span>Top View (2D)</span>
+          </button>
 
-            {/* Geological Sub-Grade Earth Hatching */}
-            <pattern id="earthHatch" width="16" height="16" patternUnits="userSpaceOnUse">
-              <line x1="0" y1="16" x2="16" y2="0" stroke="#334155" strokeWidth="1" />
-              <line x1="8" y1="16" x2="16" y2="8" stroke="#334155" strokeWidth="0.75" />
-            </pattern>
+          <button
+            type="button"
+            onClick={() => setViewMode('3d')}
+            className={`px-3.5 py-1.5 rounded text-xs font-medium flex items-center gap-2 transition-all ${
+              viewMode === '3d'
+                ? 'bg-gradient-to-r from-cyan-600 to-blue-600 text-white shadow-sm font-semibold'
+                : 'text-cyan-400 hover:text-cyan-200 hover:bg-slate-900'
+            }`}
+          >
+            <Rotate3d className="w-3.5 h-3.5 text-cyan-300" />
+            <span>3D Interactive</span>
+            <span className="px-1 py-0.2 bg-cyan-400/20 text-cyan-300 text-[9px] rounded font-mono uppercase">R3F</span>
+          </button>
+        </div>
 
-            {/* Shading Shadow Dot Screen */}
-            <pattern id="shadowDots" width="6" height="6" patternUnits="userSpaceOnUse">
-              <circle cx="3" cy="3" r="1.2" fill="#000000" opacity="0.45" />
-            </pattern>
+        <div className="flex items-center gap-2 text-xs font-mono text-slate-400">
+          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+          <span className="hidden sm:inline">Active View:</span>
+          <span className="text-slate-200 font-bold">
+            {viewMode === 'front'
+              ? 'Front Elevation (South Facade & Solar Angles)'
+              : viewMode === 'side'
+              ? `Side Elevation (Depth ${activeGeometry.lengthMeters.toFixed(1)}m & Fenestration)`
+              : viewMode === 'top'
+              ? 'Top Plan & Roof Footprint (Eaves & Carpet Area)'
+              : 'Interactive 3D Schematic (Orbit & X-Ray)'}
+          </span>
+        </div>
+      </div>
 
-            {/* Airflow Direction Vector Arrow */}
-            <marker id="airflowArrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-              <path d="M 0 1 L 8 5 L 0 9 z" fill="#38bdf8" />
-            </marker>
-          </defs>
+      {/* 3D INTERACTIVE VIEW OR 2D ORTHOGRAPHIC SVG STAGE */}
+      {viewMode === '3d' ? (
+        <div className="relative w-full aspect-[16/9] max-h-[500px] bg-[#0b1220] overflow-hidden border-b border-slate-800">
+          <Shelter3D geometry={activeGeometry} />
+        </div>
+      ) : (
+        <div className="relative w-full aspect-[16/9] max-h-[500px] bg-[#0b1220] flex items-center justify-center p-2 overflow-hidden border-b border-slate-800">
+          <svg
+            viewBox={`0 0 ${svgWidth} ${svgHeight}`}
+            className="w-full h-full select-none"
+            style={{ fontVariantNumeric: 'tabular-nums' }}
+          >
+            <defs>
+              {/* Precision CAD Drafting Grid */}
+              <pattern id="cadGrid" width="20" height="20" patternUnits="userSpaceOnUse">
+                <path d="M 20 0 L 0 0 0 20" fill="none" stroke="rgba(56, 189, 248, 0.05)" strokeWidth="1" />
+              </pattern>
+              <pattern id="cadMajorGrid" width="100" height="100" patternUnits="userSpaceOnUse">
+                <rect width="100" height="100" fill="url(#cadGrid)" />
+                <path d="M 100 0 L 0 0 0 100" fill="none" stroke="rgba(56, 189, 248, 0.12)" strokeWidth="1" />
+              </pattern>
 
-          {/* Background Drafting Grid */}
-          <rect width={svgWidth} height={svgHeight} fill="url(#cadMajorGrid)" />
+              {/* Masonry Cross-Hatching */}
+              <pattern id="masonryHatch" width="12" height="12" patternTransform="rotate(45 0 0)" patternUnits="userSpaceOnUse">
+                <line x1="0" y1="0" x2="0" y2="12" stroke="#64748b" strokeWidth="1.2" />
+              </pattern>
+
+              {/* Continuous Insulation Batt Hatching */}
+              <pattern id="insulationPattern" width="10" height="8" patternUnits="userSpaceOnUse">
+                <path d="M 0 4 Q 2.5 0, 5 4 T 10 4" fill="none" stroke="#f59e0b" strokeWidth="1.2" />
+              </pattern>
+
+              {/* Geological Sub-Grade Earth Hatching */}
+              <pattern id="earthHatch" width="16" height="16" patternUnits="userSpaceOnUse">
+                <line x1="0" y1="16" x2="16" y2="0" stroke="#334155" strokeWidth="1" />
+                <line x1="8" y1="16" x2="16" y2="8" stroke="#334155" strokeWidth="0.75" />
+              </pattern>
+
+              {/* Shading Shadow Dot Screen */}
+              <pattern id="shadowDots" width="6" height="6" patternUnits="userSpaceOnUse">
+                <circle cx="3" cy="3" r="1.2" fill="#000000" opacity="0.45" />
+              </pattern>
+
+              {/* Airflow Direction Vector Arrow */}
+              <marker id="airflowArrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                <path d="M 0 1 L 8 5 L 0 9 z" fill="#38bdf8" />
+              </marker>
+            </defs>
+
+            {/* Background Drafting Grid */}
+            <rect width={svgWidth} height={svgHeight} fill="url(#cadMajorGrid)" />
+
+            {/* ======================================================================= */}
+            {/* 2D ORTHOGRAPHIC PROJECTION: FRONT VIEW (SOUTH ELEVATION & SECTION)      */}
+            {/* ======================================================================= */}
+            {viewMode === 'front' && (
+              <g id="frontElevationView">
 
           {/* SOLAR RAY & SHADOW ANGLE */}
           {showSolarRay && (
@@ -741,6 +870,19 @@ export const InteractiveShelterVisualizer: React.FC<InteractiveShelterVisualizer
                 Q ${startX + buildingWidthUnits / 2} ${vaultApexY + 22} ${endX - wallThicknessUnits - insThicknessUnits} ${kneeWallTopY}
                 L ${endX - wallThicknessUnits - insThicknessUnits} ${effectiveGroundY}
                 Z
+              `}
+              fill="#0f172a"
+              stroke="#1e293b"
+              strokeWidth="1"
+            />
+          ) : isButterfly ? (
+            <polygon
+              points={`
+                ${startX + wallThicknessUnits + insThicknessUnits},${effectiveGroundY}
+                ${startX + wallThicknessUnits + insThicknessUnits},${effectiveWallTopY - 24}
+                ${startX + buildingWidthUnits / 2},${effectiveWallTopY + 12}
+                ${endX - wallThicknessUnits - insThicknessUnits},${effectiveWallTopY - 24}
+                ${endX - wallThicknessUnits - insThicknessUnits},${effectiveGroundY}
               `}
               fill="#0f172a"
               stroke="#1e293b"
@@ -924,15 +1066,23 @@ export const InteractiveShelterVisualizer: React.FC<InteractiveShelterVisualizer
           {/* ======================================================== */}
 
           {/* (A) PITCHED / A-FRAME ROOF (Mountain / High Precipitation) */}
-          {isPitched && roofType !== 'ventilated_cavity' && (
+          {isPitched && !isYurt && !isHexPod && roofType !== 'ventilated_cavity' && (
             <g>
               {/* Primary Rafter / Triangular Truss */}
               <polygon
-                points={`
-                  ${startX - overhangUnits},${effectiveWallTopY + 10}
-                  ${startX + buildingWidthUnits / 2},${effectiveRoofApexY}
-                  ${endX + overhangUnits},${effectiveWallTopY + 10}
-                `}
+                points={
+                  isAFrame
+                    ? `
+                      ${startX - overhangUnits},${effectiveGroundY}
+                      ${startX + buildingWidthUnits / 2},${effectiveRoofApexY}
+                      ${endX + overhangUnits},${effectiveGroundY}
+                    `
+                    : `
+                      ${startX - overhangUnits},${effectiveWallTopY + 10}
+                      ${startX + buildingWidthUnits / 2},${effectiveRoofApexY}
+                      ${endX + overhangUnits},${effectiveWallTopY + 10}
+                    `
+                }
                 fill="#1e293b"
                 stroke="#38bdf8"
                 strokeWidth="3"
@@ -1312,6 +1462,181 @@ export const InteractiveShelterVisualizer: React.FC<InteractiveShelterVisualizer
             </g>
           )}
 
+          {/* (F) CYLINDRICAL YURT CONICAL ROOF */}
+          {isYurt && (
+            <g>
+              <polygon
+                points={`
+                  ${startX - overhangUnits},${effectiveWallTopY + 8}
+                  ${startX + buildingWidthUnits / 2},${effectiveRoofApexY}
+                  ${endX + overhangUnits},${effectiveWallTopY + 8}
+                `}
+                fill="#1e293b"
+                stroke="#06b6d4"
+                strokeWidth="3"
+              />
+              {/* Central Compression Ring (Toono Vent / Skylight) */}
+              <ellipse
+                cx={startX + buildingWidthUnits / 2}
+                cy={effectiveRoofApexY}
+                rx="16"
+                ry="7"
+                fill="#0284c7"
+                stroke="#38bdf8"
+                strokeWidth="2"
+              />
+              {/* Radial Rafter Ribs */}
+              <line x1={startX - overhangUnits + 30} y1={effectiveWallTopY + 8} x2={startX + buildingWidthUnits / 2 - 12} y2={effectiveRoofApexY + 4} stroke="#64748b" strokeWidth="1.5" strokeDasharray="4 3" />
+              <line x1={endX + overhangUnits - 30} y1={effectiveWallTopY + 8} x2={startX + buildingWidthUnits / 2 + 12} y2={effectiveRoofApexY + 4} stroke="#64748b" strokeWidth="1.5" strokeDasharray="4 3" />
+              <text
+                x={startX + buildingWidthUnits / 2}
+                y={effectiveRoofApexY - 14}
+                textAnchor="middle"
+                fill="#06b6d4"
+                fontSize="11"
+                fontWeight="bold"
+                fontFamily="monospace"
+              >
+                YURT CONICAL ROOF | TOONO CROWN VENT | RADIAL RAFTERS
+              </text>
+            </g>
+          )}
+
+          {/* (G) HEXAGONAL POD FACETED ROOF */}
+          {isHexPod && (
+            <g>
+              <polygon
+                points={`
+                  ${startX - overhangUnits},${effectiveWallTopY + 8}
+                  ${startX + buildingWidthUnits / 2},${effectiveRoofApexY}
+                  ${endX + overhangUnits},${effectiveWallTopY + 8}
+                `}
+                fill="#1e293b"
+                stroke="#a855f7"
+                strokeWidth="3"
+              />
+              {/* Apex Structural Hub Cap */}
+              <circle
+                cx={startX + buildingWidthUnits / 2}
+                cy={effectiveRoofApexY}
+                r="10"
+                fill="#7e22ce"
+                stroke="#c084fc"
+                strokeWidth="1.5"
+              />
+              {/* Faceted Seam Lines */}
+              <line x1={startX + buildingWidthUnits * 0.22} y1={effectiveWallTopY + 8} x2={startX + buildingWidthUnits / 2} y2={effectiveRoofApexY} stroke="#c084fc" strokeWidth="1.5" strokeDasharray="3 3" />
+              <line x1={endX - buildingWidthUnits * 0.22} y1={effectiveWallTopY + 8} x2={startX + buildingWidthUnits / 2} y2={effectiveRoofApexY} stroke="#c084fc" strokeWidth="1.5" strokeDasharray="3 3" />
+              <text
+                x={startX + buildingWidthUnits / 2}
+                y={effectiveRoofApexY - 14}
+                textAnchor="middle"
+                fill="#c084fc"
+                fontSize="11"
+                fontWeight="bold"
+                fontFamily="monospace"
+              >
+                HEXAGONAL POD | 6-FACETED PYRAMID ROOF | MODULAR APEX HUB
+              </text>
+            </g>
+          )}
+
+          {/* (H) BUTTERFLY INVERTED-V ROOF */}
+          {isButterfly && (
+            <g>
+              {/* Left Wing Sloping Down to Valley */}
+              <line
+                x1={startX - overhangUnits}
+                y1={effectiveWallTopY - 28}
+                x2={startX + buildingWidthUnits / 2}
+                y2={effectiveWallTopY + 12}
+                stroke="#38bdf8"
+                strokeWidth="4"
+              />
+              {/* Right Wing Sloping Down to Valley */}
+              <line
+                x1={endX + overhangUnits}
+                y1={effectiveWallTopY - 28}
+                x2={startX + buildingWidthUnits / 2}
+                y2={effectiveWallTopY + 12}
+                stroke="#38bdf8"
+                strokeWidth="4"
+              />
+              {/* Central Valley Rainwater Gutter Box */}
+              <rect
+                x={startX + buildingWidthUnits / 2 - 12}
+                y={effectiveWallTopY + 10}
+                width="24"
+                height="14"
+                rx="2"
+                fill="#0284c7"
+                stroke="#38bdf8"
+                strokeWidth="1.5"
+              />
+              {/* Central Downspout Pipe into Floor Cistern */}
+              <line
+                x1={startX + buildingWidthUnits / 2}
+                y1={effectiveWallTopY + 24}
+                x2={startX + buildingWidthUnits / 2}
+                y2={effectiveGroundY}
+                stroke="#0284c7"
+                strokeWidth="3.5"
+                strokeDasharray="4 2"
+              />
+              {/* High Clerestory Vents under both Elevated Eaves */}
+              <rect
+                x={startX + wallThicknessUnits + 6}
+                y={effectiveWallTopY - 24}
+                width="36"
+                height="16"
+                rx="2"
+                fill="#0284c7"
+                fillOpacity="0.3"
+                stroke="#38bdf8"
+                strokeWidth="1.2"
+                strokeDasharray="2 2"
+              />
+              <rect
+                x={endX - wallThicknessUnits - 42}
+                y={effectiveWallTopY - 24}
+                width="36"
+                height="16"
+                rx="2"
+                fill="#0284c7"
+                fillOpacity="0.3"
+                stroke="#38bdf8"
+                strokeWidth="1.2"
+                strokeDasharray="2 2"
+              />
+              {/* Watershed Direction Arrows towards Central Valley */}
+              <path
+                d={`M ${startX + buildingWidthUnits * 0.18} ${effectiveWallTopY - 18} L ${startX + buildingWidthUnits * 0.42} ${effectiveWallTopY + 4}`}
+                fill="none"
+                stroke="#38bdf8"
+                strokeWidth="1.5"
+                markerEnd="url(#airflowArrow)"
+              />
+              <path
+                d={`M ${endX - buildingWidthUnits * 0.18} ${effectiveWallTopY - 18} L ${startX + buildingWidthUnits * 0.58} ${effectiveWallTopY + 4}`}
+                fill="none"
+                stroke="#38bdf8"
+                strokeWidth="1.5"
+                markerEnd="url(#airflowArrow)"
+              />
+              <text
+                x={startX + buildingWidthUnits / 2}
+                y={effectiveWallTopY - 36}
+                textAnchor="middle"
+                fill="#38bdf8"
+                fontSize="11"
+                fontWeight="bold"
+                fontFamily="monospace"
+              >
+                BUTTERFLY INVERTED-V | CENTRAL RAINWATER HARVESTING & STACK VENTS
+              </text>
+            </g>
+          )}
+
           {/* AIRFLOW STREAMLINE (Cross-Ventilation Vector) */}
           {showAirflow && (
             <g className="transition-opacity duration-200">
@@ -1422,8 +1747,783 @@ export const InteractiveShelterVisualizer: React.FC<InteractiveShelterVisualizer
               </text>
             </g>
           )}
-        </svg>
-      </div>
+        </g>
+      )}
+
+      {/* ======================================================================= */}
+      {/* 2D ORTHOGRAPHIC PROJECTION: SIDE VIEW (EAST / WEST ELEVATION & SECTION) */}
+      {/* ======================================================================= */}
+      {viewMode === 'side' && (
+        <g id="sideElevationView" className="transition-all duration-200">
+          {/* Side View Label Badge */}
+          <g transform="translate(35, 30)">
+            <rect width="210" height="28" rx="4" fill="#0f172a" fillOpacity="0.85" stroke="#334155" strokeWidth="1" />
+            <text x="12" y="18" fill="#38bdf8" fontSize="11" fontWeight="bold" fontFamily="monospace">
+              SIDE ELEVATION (2D)
+            </text>
+            <text x="145" y="18" fill="#94a3b8" fontSize="10" fontFamily="monospace">
+              DEPTH: {activeGeometry.lengthMeters.toFixed(1)}m
+            </text>
+          </g>
+
+          {/* GROUND PLANE & FOUNDATION DATUM */}
+          <rect x="0" y={groundY} width={svgWidth} height={svgHeight - groundY} fill="url(#earthHatch)" />
+          <line x1="0" y1={groundY} x2={svgWidth} y2={groundY} stroke="#475569" strokeWidth="2.5" />
+          <text x="35" y={groundY + 22} fill="#94a3b8" fontSize="11" fontFamily="monospace">
+            GL ±0.00m (Datum)
+          </text>
+
+          {/* Stilt Plinth for River Region */}
+          {isStiltPlinth && (
+            <g>
+              <rect x={sideStartX + 20} y={effectiveGroundY} width="16" height={stiltHeight} fill="#78350f" stroke="#451a03" strokeWidth="1.5" />
+              <rect x={sideStartX + sideDepthUnits / 2 - 8} y={effectiveGroundY} width="16" height={stiltHeight} fill="#78350f" stroke="#451a03" strokeWidth="1.5" />
+              <rect x={sideEndX - 36} y={effectiveGroundY} width="16" height={stiltHeight} fill="#78350f" stroke="#451a03" strokeWidth="1.5" />
+              <text x={sideStartX - 10} y={effectiveGroundY + 20} fill="#f59e0b" fontSize="10" fontFamily="monospace">
+                +0.45m Stilt Foundation
+              </text>
+            </g>
+          )}
+
+          {/* Concrete Foundation Plinth Pad */}
+          <rect
+            x={sideStartX - 12}
+            y={effectiveGroundY}
+            width={sideDepthUnits + 24}
+            height="18"
+            fill="#334155"
+            stroke="#475569"
+            strokeWidth="1.5"
+          />
+
+          {/* Internal Floor Slab */}
+          <rect
+            x={sideStartX + wallThicknessUnits}
+            y={effectiveGroundY - 10}
+            width={sideDepthUnits - 2 * wallThicknessUnits}
+            height="10"
+            fill="#64748b"
+            stroke="#475569"
+            strokeWidth="1"
+          />
+
+          {/* LEFT (NORTH / REAR) EXTERNAL WALL */}
+          <rect
+            x={sideStartX}
+            y={effectiveWallTopY}
+            width={wallThicknessUnits}
+            height={effectiveGroundY - effectiveWallTopY}
+            fill="url(#masonryHatch)"
+            stroke="#64748b"
+            strokeWidth="1.5"
+          />
+          {insThicknessUnits > 0 && (
+            <rect
+              x={sideStartX - insThicknessUnits}
+              y={effectiveWallTopY}
+              width={insThicknessUnits}
+              height={effectiveGroundY - effectiveWallTopY}
+              fill="url(#insulationPattern)"
+              stroke="#f59e0b"
+              strokeWidth="1"
+            />
+          )}
+
+          {/* RIGHT (SOUTH / FRONT) EXTERNAL WALL */}
+          <rect
+            x={sideEndX - wallThicknessUnits}
+            y={effectiveWallTopY}
+            width={wallThicknessUnits}
+            height={effectiveGroundY - effectiveWallTopY}
+            fill="url(#masonryHatch)"
+            stroke="#64748b"
+            strokeWidth="1.5"
+          />
+          {insThicknessUnits > 0 && (
+            <rect
+              x={sideEndX}
+              y={effectiveWallTopY}
+              width={insThicknessUnits}
+              height={effectiveGroundY - effectiveWallTopY}
+              fill="url(#insulationPattern)"
+              stroke="#f59e0b"
+              strokeWidth="1"
+            />
+          )}
+
+          {/* SIDE ELEVATION FACADE BODY (Between walls) */}
+          <rect
+            x={sideStartX + wallThicknessUnits}
+            y={effectiveWallTopY}
+            width={sideDepthUnits - 2 * wallThicknessUnits}
+            height={effectiveGroundY - effectiveWallTopY - 10}
+            fill="#1e293b"
+            fillOpacity="0.45"
+            stroke="#334155"
+            strokeWidth="1"
+          />
+
+          {/* SIDE WINDOW APERTURE (Derived from WWR & Orientation) */}
+          <g>
+            <rect
+              x={sideWindowX}
+              y={effectiveWindowY}
+              width={sideWindowW}
+              height={sideWindowH}
+              fill="#0284c7"
+              fillOpacity="0.28"
+              stroke="#38bdf8"
+              strokeWidth="2"
+            />
+            {/* Glazing mullions */}
+            <line
+              x1={sideWindowX + sideWindowW / 2}
+              y1={effectiveWindowY}
+              x2={sideWindowX + sideWindowW / 2}
+              y2={effectiveWindowY + sideWindowH}
+              stroke="#38bdf8"
+              strokeWidth="1.2"
+            />
+            <line
+              x1={sideWindowX}
+              y1={effectiveWindowY + sideWindowH / 2}
+              x2={sideWindowX + sideWindowW}
+              y2={effectiveWindowY + sideWindowH / 2}
+              stroke="#38bdf8"
+              strokeWidth="1.2"
+            />
+            {/* Window Glass Reflection Highlight */}
+            <polygon
+              points={`${sideWindowX + 4},${effectiveWindowY + sideWindowH - 4} ${sideWindowX + 4},${effectiveWindowY + sideWindowH - 18} ${sideWindowX + sideWindowW - 14},${effectiveWindowY + 4} ${sideWindowX + sideWindowW - 4},${effectiveWindowY + 4}`}
+              fill="#ffffff"
+              opacity="0.2"
+            />
+            {/* Side Chhajja Weather Overhang */}
+            <rect
+              x={sideWindowX - 8}
+              y={effectiveWindowY - 8}
+              width={sideWindowW + 16}
+              height="8"
+              fill="#94a3b8"
+              stroke="#cbd5e1"
+              strokeWidth="1"
+            />
+            <text
+              x={sideWindowX + sideWindowW / 2}
+              y={effectiveWindowY + sideWindowH + 14}
+              textAnchor="middle"
+              fill="#38bdf8"
+              fontSize="10"
+              fontFamily="monospace"
+            >
+              Side Fenestration (WWR: {wwrPercent}%)
+            </text>
+          </g>
+
+          {/* SIDE VIEW ROOF ASSEMBLIES (Parametric for all 4 Shapes) */}
+          {/* A. Flat Roof Box */}
+          {isFlat && (
+            <g>
+              <rect
+                x={sideStartX - overhangUnits}
+                y={effectiveWallTopY - 20}
+                width={sideDepthUnits + 2 * overhangUnits}
+                height="20"
+                fill="#334155"
+                stroke="#64748b"
+                strokeWidth="1.5"
+              />
+              <rect
+                x={sideStartX - overhangUnits}
+                y={effectiveWallTopY - 50}
+                width="18"
+                height="30"
+                fill="#475569"
+                stroke="#64748b"
+                strokeWidth="1"
+              />
+              <rect
+                x={sideEndX + overhangUnits - 18}
+                y={effectiveWallTopY - 50}
+                width="18"
+                height="30"
+                fill="#475569"
+                stroke="#64748b"
+                strokeWidth="1"
+              />
+              <text
+                x={sideStartX + sideDepthUnits / 2}
+                y={effectiveWallTopY - 28}
+                textAnchor="middle"
+                fill="#94a3b8"
+                fontSize="11"
+                fontFamily="monospace"
+              >
+                150mm RCC Slab (Drainage Fall 1:50)
+              </text>
+            </g>
+          )}
+
+          {/* B. Pitched A-Frame Roof (Side Elevation) */}
+          {isPitched && (
+            <g>
+              <rect
+                x={sideStartX - overhangUnits}
+                y={effectiveWallTopY - 16}
+                width={sideDepthUnits + 2 * overhangUnits}
+                height="16"
+                fill="#334155"
+                stroke="#475569"
+                strokeWidth="1.5"
+              />
+              <polygon
+                points={`
+                  ${sideStartX - overhangUnits},${effectiveWallTopY - 16}
+                  ${sideEndX + overhangUnits},${effectiveWallTopY - 16}
+                  ${sideEndX + overhangUnits},${effectiveRoofApexY}
+                  ${sideStartX - overhangUnits},${effectiveRoofApexY}
+                `}
+                fill="#1e293b"
+                stroke="#38bdf8"
+                strokeWidth="1.5"
+                opacity="0.85"
+              />
+              <line
+                x1={sideStartX - overhangUnits}
+                y1={effectiveRoofApexY}
+                x2={sideEndX + overhangUnits}
+                y2={effectiveRoofApexY}
+                stroke="#f59e0b"
+                strokeWidth="3"
+              />
+              {Array.from({ length: 9 }).map((_, i) => {
+                const x = sideStartX - overhangUnits + ((sideDepthUnits + 2 * overhangUnits) / 8) * i;
+                return (
+                  <line
+                    key={i}
+                    x1={x}
+                    y1={effectiveRoofApexY}
+                    x2={x}
+                    y2={effectiveWallTopY - 16}
+                    stroke="#334155"
+                    strokeWidth="1"
+                  />
+                );
+              })}
+              <circle cx={sideStartX - overhangUnits + 4} cy={effectiveWallTopY - 8} r="5" fill="#0284c7" />
+              <circle cx={sideEndX + overhangUnits - 4} cy={effectiveWallTopY - 8} r="5" fill="#0284c7" />
+              <text
+                x={sideStartX + sideDepthUnits / 2}
+                y={effectiveRoofApexY - 10}
+                textAnchor="middle"
+                fill="#f59e0b"
+                fontSize="11"
+                fontWeight="bold"
+                fontFamily="monospace"
+              >
+                LONGITUDINAL RIDGE BEAM (Pitch: {roofPitchDeg}°)
+              </text>
+            </g>
+          )}
+
+          {/* C. Vaulted Catenary Arched Roof */}
+          {isVaulted && (
+            <g>
+              <rect
+                x={sideStartX - overhangUnits}
+                y={vaultApexY}
+                width={sideDepthUnits + 2 * overhangUnits}
+                height={effectiveWallTopY - vaultApexY}
+                fill="#1e293b"
+                stroke="#64748b"
+                strokeWidth="1.5"
+              />
+              {Array.from({ length: 7 }).map((_, i) => {
+                const x = sideStartX + (sideDepthUnits / 6) * i;
+                return (
+                  <line
+                    key={i}
+                    x1={x}
+                    y1={vaultApexY}
+                    x2={x}
+                    y2={effectiveWallTopY}
+                    stroke="#475569"
+                    strokeWidth="1.5"
+                    strokeDasharray="4 2"
+                  />
+                );
+              })}
+              <text
+                x={sideStartX + sideDepthUnits / 2}
+                y={vaultApexY - 10}
+                textAnchor="middle"
+                fill="#38bdf8"
+                fontSize="11"
+                fontWeight="bold"
+                fontFamily="monospace"
+              >
+                CATENARY BARREL VAULT (Span: {activeGeometry.widthMeters}m)
+              </text>
+            </g>
+          )}
+
+          {/* D. Lean-to Sloped Roof */}
+          {isLeanTo && (
+            <g>
+              <polygon
+                points={`
+                  ${sideStartX - overhangUnits},${effectiveWallTopY - 45}
+                  ${sideEndX + overhangUnits},${effectiveWallTopY + 20}
+                  ${sideEndX + overhangUnits},${effectiveWallTopY + 35}
+                  ${sideStartX - overhangUnits},${effectiveWallTopY - 30}
+                `}
+                fill="#334155"
+                stroke="#475569"
+                strokeWidth="1.5"
+              />
+              <rect
+                x={sideStartX + wallThicknessUnits + 10}
+                y={effectiveWallTopY - 25}
+                width="40"
+                height="18"
+                fill="#38bdf8"
+                fillOpacity="0.4"
+                stroke="#38bdf8"
+                strokeWidth="1.5"
+              />
+              <text
+                x={sideStartX + sideDepthUnits / 2}
+                y={effectiveWallTopY - 48}
+                textAnchor="middle"
+                fill="#38bdf8"
+                fontSize="11"
+                fontFamily="monospace"
+              >
+                14° Mono-Pitch Rafters (Directional Drainage)
+              </text>
+            </g>
+          )}
+
+          {/* CROSS-VENTILATION AIRFLOW STREAMLINE */}
+          {showAirflow && (
+            <g opacity="0.85">
+              <path
+                d={`M ${sideStartX - 60} ${effectiveWindowY + sideWindowH / 2} Q ${sideWindowX} ${effectiveWindowY + sideWindowH / 2 + 10}, ${sideStartX + sideDepthUnits / 2} ${effectiveGroundY - 40} T ${sideEndX + 60} ${effectiveWindowY + sideWindowH / 2 - 20}`}
+                fill="none"
+                stroke="#38bdf8"
+                strokeWidth="2.5"
+                strokeDasharray="8 4"
+                markerEnd="url(#airflowArrow)"
+              />
+              <text
+                x={sideStartX + sideDepthUnits / 2}
+                y={effectiveGroundY - 55}
+                textAnchor="middle"
+                fill="#38bdf8"
+                fontSize="10"
+                fontFamily="monospace"
+              >
+                Longitudinal Airflow ({activeGeometry.airChangesPerHourACH} ACH)
+              </text>
+            </g>
+          )}
+
+          {/* SIDE VIEW CAD DIMENSIONS */}
+          {showDimensions && (
+            <g stroke="#94a3b8" strokeWidth="1" opacity="0.85">
+              <line x1={sideStartX} y1={effectiveGroundY + 36} x2={sideEndX} y2={effectiveGroundY + 36} />
+              <line x1={sideStartX} y1={effectiveGroundY + 30} x2={sideStartX} y2={effectiveGroundY + 42} />
+              <line x1={sideEndX} y1={effectiveGroundY + 30} x2={sideEndX} y2={effectiveGroundY + 42} />
+              <text
+                x={sideStartX + sideDepthUnits / 2}
+                y={effectiveGroundY + 50}
+                textAnchor="middle"
+                fill="#94a3b8"
+                fontSize="11"
+                fontFamily="monospace"
+              >
+                DEPTH: {activeGeometry.lengthMeters.toFixed(1)}m
+              </text>
+
+              <line x1={sideStartX - 30} y1={effectiveGroundY} x2={sideStartX - 30} y2={effectiveWallTopY} />
+              <line x1={sideStartX - 36} y1={effectiveGroundY} x2={sideStartX - 24} y2={effectiveGroundY} />
+              <line x1={sideStartX - 36} y1={effectiveWallTopY} x2={sideStartX - 24} y2={effectiveWallTopY} />
+              <text
+                x={sideStartX - 38}
+                y={(effectiveGroundY + effectiveWallTopY) / 2}
+                textAnchor="end"
+                dominantBaseline="middle"
+                fill="#94a3b8"
+                fontSize="11"
+                fontFamily="monospace"
+              >
+                H: {activeGeometry.heightMeters.toFixed(1)}m
+              </text>
+
+              <line x1={sideStartX - overhangUnits} y1={effectiveWallTopY - 24} x2={sideStartX} y2={effectiveWallTopY - 24} />
+              <text
+                x={sideStartX - overhangUnits / 2}
+                y={effectiveWallTopY - 30}
+                textAnchor="middle"
+                fill="#f59e0b"
+                fontSize="10"
+                fontFamily="monospace"
+              >
+                O: {overhangDepthM.toFixed(2)}m
+              </text>
+
+              <text
+                x={sideStartX + wallThicknessUnits / 2}
+                y={effectiveWallTopY - 6}
+                textAnchor="middle"
+                fill="#38bdf8"
+                fontSize="10"
+                fontWeight="bold"
+                fontFamily="monospace"
+              >
+                {wallThicknessMm}mm
+              </text>
+            </g>
+          )}
+        </g>
+      )}
+
+      {/* ======================================================================= */}
+      {/* 2D ORTHOGRAPHIC PROJECTION: TOP VIEW (PLAN & ROOF FOOTPRINT)            */}
+      {/* ======================================================================= */}
+      {viewMode === 'top' && (
+        <g id="topPlanView" className="transition-all duration-200">
+          {/* Top View Title Badge */}
+          <g transform="translate(35, 30)">
+            <rect width="260" height="28" rx="4" fill="#0f172a" fillOpacity="0.85" stroke="#334155" strokeWidth="1" />
+            <text x="12" y="18" fill="#38bdf8" fontSize="11" fontWeight="bold" fontFamily="monospace">
+              PLAN & ROOF FOOTPRINT (2D)
+            </text>
+            <text x="175" y="18" fill="#94a3b8" fontSize="10" fontFamily="monospace">
+              SCALE: 1:50
+            </text>
+          </g>
+
+          {/* COMPASS ROSE (Top Right) */}
+          <g transform="translate(810, 80)">
+            <circle cx="0" cy="0" r="38" fill="#0f172a" stroke="#334155" strokeWidth="1.5" />
+            <circle cx="0" cy="0" r="30" fill="none" stroke="#1e293b" strokeWidth="1" strokeDasharray="3 3" />
+            <polygon points="0,-28 -7,-4 7,-4" fill="#ef4444" />
+            <polygon points="0,28 -7,4 7,4" fill="#94a3b8" />
+            <line x1="-28" y1="0" x2="28" y2="0" stroke="#475569" strokeWidth="1.5" />
+            <line x1="0" y1="-28" x2="0" y2="28" stroke="#475569" strokeWidth="1.5" />
+            <text x="0" y="-32" textAnchor="middle" fill="#ef4444" fontSize="11" fontWeight="bold" fontFamily="monospace">N</text>
+            <text x="0" y="40" textAnchor="middle" fill="#38bdf8" fontSize="9" fontFamily="monospace">S (Solar)</text>
+            <text x="36" y="4" textAnchor="start" fill="#94a3b8" fontSize="9" fontFamily="monospace">E</text>
+            <text x="-36" y="4" textAnchor="end" fill="#94a3b8" fontSize="9" fontFamily="monospace">W</text>
+          </g>
+
+          {/* 1. OUTER ROOF FOOTPRINT BOUNDARY (Including Eaves Overhang) */}
+          <g>
+            <rect
+              x={planStartX - planOverhangUnits}
+              y={planStartY - planOverhangUnits}
+              width={planLengthUnits + 2 * planOverhangUnits}
+              height={planWidthUnits + 2 * planOverhangUnits}
+              rx="4"
+              fill="#1e293b"
+              fillOpacity="0.3"
+              stroke="#f59e0b"
+              strokeWidth="1.5"
+              strokeDasharray="6 4"
+            />
+            <text
+              x={planStartX - planOverhangUnits + 8}
+              y={planStartY - planOverhangUnits - 8}
+              fill="#f59e0b"
+              fontSize="10"
+              fontFamily="monospace"
+            >
+              ROOF DRIP LINE (Overhang: {overhangDepthM}m)
+            </text>
+          </g>
+
+          {/* 2. PERIMETER MASONRY WALLS (Double Line Showing True Wall Thickness 't') */}
+          <rect
+            x={planStartX}
+            y={planStartY}
+            width={planLengthUnits}
+            height={planWidthUnits}
+            fill="url(#masonryHatch)"
+            stroke="#64748b"
+            strokeWidth="2"
+          />
+
+          {/* Inner room cutout (Usable Carpet Area) */}
+          <rect
+            x={planStartX + planWallThickUnits}
+            y={planStartY + planWallThickUnits}
+            width={Math.max(10, planLengthUnits - 2 * planWallThickUnits)}
+            height={Math.max(10, planWidthUnits - 2 * planWallThickUnits)}
+            fill="#0b1220"
+            stroke="#64748b"
+            strokeWidth="1.5"
+          />
+
+          {/* 3. WALL FENESTRATION / OPENINGS */}
+          {/* South Wall Door Cutout (Bottom wall) */}
+          <g>
+            <rect
+              x={planStartX + planLengthUnits * 0.22}
+              y={planEndY - planWallThickUnits}
+              width={planDoorW}
+              height={planWallThickUnits}
+              fill="#0b1220"
+            />
+            <line
+              x1={planStartX + planLengthUnits * 0.22}
+              y1={planEndY}
+              x2={planStartX + planLengthUnits * 0.22}
+              y2={planEndY + 25}
+              stroke="#b45309"
+              strokeWidth="2.5"
+            />
+            <path
+              d={`M ${planStartX + planLengthUnits * 0.22 + planDoorW} ${planEndY} A ${planDoorW} ${planDoorW} 0 0 1 ${planStartX + planLengthUnits * 0.22} ${planEndY + 25}`}
+              fill="none"
+              stroke="#78350f"
+              strokeWidth="1"
+              strokeDasharray="2 2"
+            />
+            <text
+              x={planStartX + planLengthUnits * 0.22 + planDoorW / 2}
+              y={planEndY + 36}
+              textAnchor="middle"
+              fill="#94a3b8"
+              fontSize="9"
+              fontFamily="monospace"
+            >
+              Door
+            </text>
+          </g>
+
+          {/* South Wall Window Cutout (Bottom wall) */}
+          <g>
+            <rect
+              x={planStartX + planLengthUnits * 0.60}
+              y={planEndY - planWallThickUnits}
+              width={planWindowW}
+              height={planWallThickUnits}
+              fill="#0b1220"
+            />
+            <line
+              x1={planStartX + planLengthUnits * 0.60}
+              y1={planEndY - planWallThickUnits / 2}
+              x2={planStartX + planLengthUnits * 0.60 + planWindowW}
+              y2={planEndY - planWallThickUnits / 2}
+              stroke="#38bdf8"
+              strokeWidth="2.5"
+            />
+            <rect
+              x={planStartX + planLengthUnits * 0.60 - 6}
+              y={planEndY}
+              width={planWindowW + 12}
+              height={planOverhangUnits * 0.75}
+              fill="#0284c7"
+              fillOpacity="0.25"
+              stroke="#38bdf8"
+              strokeWidth="1"
+              strokeDasharray="3 3"
+            />
+            <text
+              x={planStartX + planLengthUnits * 0.60 + planWindowW / 2}
+              y={planEndY + planOverhangUnits * 0.75 + 14}
+              textAnchor="middle"
+              fill="#38bdf8"
+              fontSize="10"
+              fontFamily="monospace"
+            >
+              South Window (WWR: {wwrPercent}%)
+            </text>
+          </g>
+
+          {/* East Side Window Cutout (Right wall) */}
+          <g>
+            <rect
+              x={planEndX - planWallThickUnits}
+              y={planCenterY - 24}
+              width={planWallThickUnits}
+              height="48"
+              fill="#0b1220"
+            />
+            <line
+              x1={planEndX - planWallThickUnits / 2}
+              y1={planCenterY - 24}
+              x2={planEndX - planWallThickUnits / 2}
+              y2={planCenterY + 24}
+              stroke="#38bdf8"
+              strokeWidth="2"
+            />
+            <rect
+              x={planEndX}
+              y={planCenterY - 28}
+              width={planOverhangUnits * 0.6}
+              height="56"
+              fill="#0284c7"
+              fillOpacity="0.2"
+              stroke="#38bdf8"
+              strokeWidth="1"
+              strokeDasharray="2 2"
+            />
+          </g>
+
+          {/* 4. ROOF RIDGE & WATERSHED ARROWS */}
+          {isPitched && (
+            <g>
+              <line
+                x1={planStartX - planOverhangUnits}
+                y1={planCenterY}
+                x2={planEndX + planOverhangUnits}
+                y2={planCenterY}
+                stroke="#f59e0b"
+                strokeWidth="2.5"
+              />
+              <g stroke="#f59e0b" strokeWidth="1.5">
+                <line x1={planCenterX - 60} y1={planCenterY - 10} x2={planCenterX - 60} y2={planStartY - 5} markerEnd="url(#airflowArrow)" />
+                <line x1={planCenterX + 60} y1={planCenterY - 10} x2={planCenterX + 60} y2={planStartY - 5} markerEnd="url(#airflowArrow)" />
+                <line x1={planCenterX - 60} y1={planCenterY + 10} x2={planCenterX - 60} y2={planEndY + 5} markerEnd="url(#airflowArrow)" />
+                <line x1={planCenterX + 60} y1={planCenterY + 10} x2={planCenterX + 60} y2={planEndY + 5} markerEnd="url(#airflowArrow)" />
+              </g>
+              <text
+                x={planCenterX}
+                y={planCenterY - 8}
+                textAnchor="middle"
+                fill="#f59e0b"
+                fontSize="11"
+                fontWeight="bold"
+                fontFamily="monospace"
+              >
+                CENTRAL ROOF RIDGE (Pitch: {roofPitchDeg}°)
+              </text>
+            </g>
+          )}
+
+          {isLeanTo && (
+            <g>
+              <line x1={planCenterX - 50} y1={planStartY + 20} x2={planCenterX - 50} y2={planEndY - 20} stroke="#38bdf8" strokeWidth="1.5" markerEnd="url(#airflowArrow)" />
+              <line x1={planCenterX + 50} y1={planStartY + 20} x2={planCenterX + 50} y2={planEndY - 20} stroke="#38bdf8" strokeWidth="1.5" markerEnd="url(#airflowArrow)" />
+              <text
+                x={planCenterX}
+                y={planCenterY}
+                textAnchor="middle"
+                fill="#38bdf8"
+                fontSize="11"
+                fontWeight="bold"
+                fontFamily="monospace"
+              >
+                SLOPE DIRECTION (14° Single Pitch)
+              </text>
+            </g>
+          )}
+
+          {isFlat && (
+            <g>
+              <line x1={planCenterX - 40} y1={planCenterY - 40} x2={planStartX + 20} y2={planStartY + 20} stroke="#94a3b8" strokeWidth="1" strokeDasharray="3 3" />
+              <line x1={planCenterX + 40} y1={planCenterY + 40} x2={planEndX - 20} y2={planEndY - 20} stroke="#94a3b8" strokeWidth="1" strokeDasharray="3 3" />
+              <text
+                x={planCenterX}
+                y={planCenterY - 10}
+                textAnchor="middle"
+                fill="#94a3b8"
+                fontSize="11"
+                fontFamily="monospace"
+              >
+                FLAT DECK (1:50 Fall to Rainwater Scuppers)
+              </text>
+            </g>
+          )}
+
+          {/* 5. USABLE CARPET AREA & ROOM ANNOTATIONS */}
+          <g>
+            <text
+              x={planCenterX}
+              y={planCenterY + 16}
+              textAnchor="middle"
+              fill="#e2e8f0"
+              fontSize="12"
+              fontWeight="bold"
+              fontFamily="monospace"
+            >
+              CARPET AREA: {((activeGeometry.lengthMeters - 2 * (wallThicknessMm / 1000)) * (activeGeometry.widthMeters - 2 * (wallThicknessMm / 1000))).toFixed(1)} m²
+            </text>
+            <text
+              x={planCenterX}
+              y={planCenterY + 32}
+              textAnchor="middle"
+              fill="#94a3b8"
+              fontSize="10"
+              fontFamily="monospace"
+            >
+              Gross Volume: {shapeMetrics.internalVolumeM3.toFixed(1)} m³ · S/V: {shapeMetrics.surfaceAreaToVolumeRatio} m⁻¹
+            </text>
+          </g>
+
+          {/* 6. TOP VIEW CAD DIMENSIONS */}
+          {showDimensions && (
+            <g stroke="#94a3b8" strokeWidth="1" opacity="0.85">
+              <line x1={planStartX} y1={planEndY + 65} x2={planEndX} y2={planEndY + 65} />
+              <line x1={planStartX} y1={planEndY + 58} x2={planStartX} y2={planEndY + 72} />
+              <line x1={planEndX} y1={planEndY + 58} x2={planEndX} y2={planEndY + 72} />
+              <text
+                x={planCenterX}
+                y={planEndY + 80}
+                textAnchor="middle"
+                fill="#94a3b8"
+                fontSize="11"
+                fontFamily="monospace"
+              >
+                LENGTH: {activeGeometry.lengthMeters.toFixed(1)}m
+              </text>
+
+              <line x1={planStartX - planOverhangUnits - 25} y1={planStartY} x2={planStartX - planOverhangUnits - 25} y2={planEndY} />
+              <line x1={planStartX - planOverhangUnits - 32} y1={planStartY} x2={planStartX - planOverhangUnits - 18} y2={planStartY} />
+              <line x1={planStartX - planOverhangUnits - 32} y1={planEndY} x2={planStartX - planOverhangUnits - 18} y2={planEndY} />
+              <text
+                x={planStartX - planOverhangUnits - 36}
+                y={planCenterY}
+                textAnchor="end"
+                dominantBaseline="middle"
+                fill="#94a3b8"
+                fontSize="11"
+                fontFamily="monospace"
+              >
+                WIDTH: {activeGeometry.widthMeters.toFixed(1)}m
+              </text>
+
+              <text
+                x={planStartX + planWallThickUnits / 2}
+                y={planStartY - 6}
+                textAnchor="middle"
+                fill="#38bdf8"
+                fontSize="10"
+                fontWeight="bold"
+                fontFamily="monospace"
+              >
+                t={wallThicknessMm}mm
+              </text>
+
+              <text
+                x={planEndX + planOverhangUnits / 2}
+                y={planStartY - 6}
+                textAnchor="middle"
+                fill="#f59e0b"
+                fontSize="10"
+                fontFamily="monospace"
+              >
+                eaves={overhangDepthM.toFixed(2)}m
+              </text>
+            </g>
+          )}
+        </g>
+      )}
+    </svg>
+  </div>
+)}
 
       {/* ========================================================================= */}
       {/* INTERACTIVE CONTROLS PANEL: 3 CORE PARAMETRIC RANGE SLIDERS + CONTROLS    */}
@@ -1702,11 +2802,11 @@ export const InteractiveShelterVisualizer: React.FC<InteractiveShelterVisualizer
       <div className="p-4 bg-slate-950 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 text-xs font-mono">
         <div className="bg-slate-900/90 p-2.5 rounded border border-slate-800">
           <div className="text-slate-400 text-[10px]">BASE GEOMETRY & FORM</div>
-          <div className="text-sky-400 text-sm font-bold mt-0.5 truncate">
-            {shapeMetrics.shapeName}
+          <div className="text-sky-400 text-sm font-bold mt-0.5 truncate capitalize">
+            {shapeMetrics.shape.replace(/_/g, ' ')}
           </div>
           <div className="text-slate-500 text-[11px] mt-0.5">
-            S/V: {shapeMetrics.surfaceAreaToVolumeRatio} m⁻¹ · Vol: {shapeMetrics.volumeM3} m³
+            S/V: {shapeMetrics.surfaceAreaToVolumeRatio} m⁻¹ · Vol: {shapeMetrics.internalVolumeM3} m³
           </div>
         </div>
 

@@ -10,8 +10,9 @@ import React from 'react';
 import { ArchitecturalShape, ClimateData, RegionId, ShelterDesign, ShelterGeometry } from '../types';
 import { MATERIALS_DATABASE } from '../data/materials';
 import { DEFAULT_CLIMATES } from '../data/defaultClimates';
-import { RefreshCw, MapPin, Sparkles, Sliders, ShieldCheck } from 'lucide-react';
+import { RefreshCw, MapPin, Sparkles, Sliders, ShieldCheck, FolderOpen, Check } from 'lucide-react';
 import { ShapeSelector } from './ShapeSelector';
+import { saveDesignAsNew } from '../services/storageService';
 
 interface InputDashboardProps {
   design: ShelterDesign;
@@ -36,6 +37,14 @@ export const InputDashboard: React.FC<InputDashboardProps> = ({
   const roofMaterials = MATERIALS_DATABASE.filter((m) => m.category === 'roof');
   const insulationMaterials = MATERIALS_DATABASE.filter((m) => m.category === 'insulation');
   const glazingMaterials = MATERIALS_DATABASE.filter((m) => m.category === 'glazing');
+
+  const [savedToast, setSavedToast] = React.useState<boolean>(false);
+
+  const handleQuickSave = () => {
+    saveDesignAsNew(design);
+    setSavedToast(true);
+    setTimeout(() => setSavedToast(false), 3500);
+  };
 
   const updateGeometry = (field: keyof ShelterGeometry, value: any) => {
     onDesignChange({
@@ -62,6 +71,21 @@ export const InputDashboard: React.FC<InputDashboardProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleQuickSave}
+            id="quick-save-design-btn"
+            className={`px-3 py-1.5 text-xs font-semibold rounded transition-all flex items-center gap-1.5 cursor-pointer shadow-xs ${
+              savedToast
+                ? 'bg-emerald-600 text-white border border-emerald-700'
+                : 'text-blue-700 bg-blue-50 border border-blue-200 hover:bg-blue-100'
+            }`}
+            title="Save active design to offline local storage"
+          >
+            {savedToast ? <Check className="w-3.5 h-3.5" /> : <FolderOpen className="w-3.5 h-3.5 text-blue-600" />}
+            {savedToast ? 'Saved to Offline Storage!' : 'Save Design (Offline)'}
+          </button>
+
           <button
             type="button"
             onClick={onResetToArchetype}
@@ -149,16 +173,32 @@ export const InputDashboard: React.FC<InputDashboardProps> = ({
             selectedShape={design.geometry.architecturalShape || 'flat_box'}
             onSelectShape={(newShape: ArchitecturalShape) => {
               const roofTypeMap: Record<ArchitecturalShape, 'flat' | 'pitched' | 'vaulted' | 'ventilated_cavity'> = {
+                standard_cuboid: 'flat',
                 flat_box: 'flat',
+                a_frame_pitched: 'pitched',
                 pitched_a_frame: 'pitched',
+                gabled_cuboid: 'pitched',
+                dome_vaulted: 'vaulted',
                 vaulted_dome: 'vaulted',
+                cylindrical_yurt: 'pitched',
+                hexagonal_pod: 'pitched',
+                lean_to_sloped: 'pitched',
                 lean_to: 'pitched',
+                butterfly_roof: 'pitched',
               };
               const pitchMap: Record<ArchitecturalShape, number> = {
+                standard_cuboid: 0,
                 flat_box: 0,
+                a_frame_pitched: 45,
                 pitched_a_frame: 30,
+                gabled_cuboid: 25,
+                dome_vaulted: 25,
                 vaulted_dome: 25,
+                cylindrical_yurt: 22,
+                hexagonal_pod: 24,
+                lean_to_sloped: 14,
                 lean_to: 14,
+                butterfly_roof: 18,
               };
               onDesignChange({
                 ...design,
@@ -166,7 +206,7 @@ export const InputDashboard: React.FC<InputDashboardProps> = ({
                   ...design.geometry,
                   architecturalShape: newShape,
                   roofType: roofTypeMap[newShape],
-                  roofPitchDeg: pitchMap[newShape]
+                  roofPitchDegrees: pitchMap[newShape]
                 }
               });
             }}

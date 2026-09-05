@@ -16,6 +16,7 @@ import {
   ClimateData,
   HourlyThermalPoint,
   MaterialProperty,
+  ShelterDesign,
   ShelterGeometry,
   SimulationResults
 } from '../types';
@@ -406,21 +407,37 @@ export function runThermalSimulation(
     `Thermal Mass Damping: Diurnal swing dampened by ${dampingPercent}% with a ${lagHours}-hour thermal phase lag.`
   );
 
-  if (shapeMetrics.shape === 'pitched_a_frame') {
+  if (shapeMetrics.shape === 'a_frame_pitched' || shapeMetrics.shape === 'pitched_a_frame') {
     observations.push(
-      `Pitched A-Frame form (+${shapeMetrics.apexRiseMeters}m apex attic rise) enhances rapid precipitation/snow runoff and provides an attic thermal cushion.`
+      `A-Frame / Pitched form (+${shapeMetrics.apexRiseMeters}m peak) eliminates exposed vertical side walls, preventing snow accumulation and deflecting high-altitude mountain winds.`
     );
-  } else if (shapeMetrics.shape === 'vaulted_dome') {
+  } else if (shapeMetrics.shape === 'gabled_cuboid') {
     observations.push(
-      `Vaulted Dome arch optimizes thermal envelope efficiency (S/V ratio: ${shapeMetrics.surfaceAreaToVolumeRatio}, solar attenuation factor: ${shapeSolarFactor}), minimizing radiant peak gain in arid climates.`
+      `Gabled Roof Cuboid (+${shapeMetrics.apexRiseMeters}m gable rise) provides a ventilated attic buffer volume (${shapeMetrics.internalVolumeM3}m³) with balanced 2-pitch watershed.`
     );
-  } else if (shapeMetrics.shape === 'lean_to') {
+  } else if (shapeMetrics.shape === 'dome_vaulted' || shapeMetrics.shape === 'vaulted_dome') {
     observations.push(
-      `Lean-to mono-pitch profile (${shapeMetrics.eavesHeightMeters}m to ${shapeMetrics.peakHeightMeters}m) streamlines natural wind shedding and enables rapid modular assembly.`
+      `Dome / Vaulted hemisphere achieves lowest SA/V ratio (${shapeMetrics.surfaceAreaToVolumeRatio}) and lowest solar factor (${shapeSolarFactor}), slashing peak radiant solar heat gain in desert zones.`
+    );
+  } else if (shapeMetrics.shape === 'cylindrical_yurt') {
+    observations.push(
+      `Cylindrical / Yurt circular profile (radius ${Math.sqrt(shapeMetrics.floorAreaM2 / Math.PI).toFixed(2)}m) delivers continuous laminar airflow deflection with high aerodynamic wind resistance.`
+    );
+  } else if (shapeMetrics.shape === 'hexagonal_pod') {
+    observations.push(
+      `Hexagonal Pod with 6-faceted pyramid roof enables optimal structural rigidity and zero-gap tessellation for clustered rapid disaster communities.`
+    );
+  } else if (shapeMetrics.shape === 'lean_to_sloped' || shapeMetrics.shape === 'lean_to') {
+    observations.push(
+      `Lean-to mono-pitch profile (${shapeMetrics.eavesHeightMeters}m to ${shapeMetrics.peakHeightMeters}m) streamlines natural wind shedding and enables rapid single-plane modular assembly.`
+    );
+  } else if (shapeMetrics.shape === 'butterfly_roof') {
+    observations.push(
+      `Butterfly Inverted-V Roof channels 100% of rainwater toward central valley trough for high-capacity monsoon harvesting and accommodates high clerestory stack ventilation.`
     );
   } else {
     observations.push(
-      `Flat-Roof Box baseline provides maximum cubic volume (${roomVolume}m³) with a surface-area-to-volume ratio of ${shapeMetrics.surfaceAreaToVolumeRatio}.`
+      `Standard Cuboid baseline provides maximum orthogonal cubic volume (${roomVolume}m³) with an exposed envelope surface-area-to-volume ratio of ${shapeMetrics.surfaceAreaToVolumeRatio}.`
     );
   }
 
@@ -458,4 +475,21 @@ export function runThermalSimulation(
     roofAreaM2: roofArea,
     billOfQuantities: boq
   };
+}
+
+/**
+ * Convenient wrapper taking a full ShelterDesign and ClimateData
+ */
+export function simulateShelterThermalPerformance(
+  design: ShelterDesign,
+  climate: ClimateData
+): SimulationResults {
+  return runThermalSimulation(
+    design.geometry,
+    climate,
+    design.wallMaterialId,
+    design.roofMaterialId,
+    design.insulationMaterialId,
+    design.glazingMaterialId
+  );
 }

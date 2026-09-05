@@ -39,23 +39,36 @@ export interface ShapeGeometryMetrics {
 }
 
 /**
- * Resolves architectural shape cleanly, defaulting to 'flat_box' or mapping from roofType if omitted.
+ * Resolves architectural shape cleanly, supporting all 8 shapes and legacy aliases.
  */
 export function resolveArchitecturalShape(geometry: ShelterGeometry): ArchitecturalShape {
   if (geometry.architecturalShape) {
-    return geometry.architecturalShape;
+    const s = geometry.architecturalShape;
+    if (s === 'flat_box') return 'standard_cuboid';
+    if (s === 'pitched_a_frame') return 'a_frame_pitched';
+    if (s === 'vaulted_dome') return 'dome_vaulted';
+    if (s === 'lean_to') return 'lean_to_sloped';
+    return s;
   }
   if (geometry.roofType === 'vaulted') {
-    return 'vaulted_dome';
+    return 'dome_vaulted';
   }
   if (geometry.roofType === 'pitched' || geometry.roofType === 'ventilated_cavity') {
-    return 'pitched_a_frame';
+    return 'gabled_cuboid';
   }
-  return 'flat_box';
+  return 'standard_cuboid';
 }
 
 /**
- * Computes exact mathematical surface areas, internal volumes, and S/V ratios for all 4 architectural forms.
+ * Computes exact mathematical surface areas, internal volumes, and S/V ratios for all 8 architectural forms:
+ * 1. Standard Cuboid (Baseline orthogonal prism with parapet)
+ * 2. A-Frame / Pitched (Steep triangular roof reaching ground, zero side walls)
+ * 3. Gabled Roof Cuboid (Standard rectangular walls with dual-pitch gable roof)
+ * 4. Dome / Vaulted (Hemispherical structure with minimal SA/V ratio)
+ * 5. Cylindrical / Yurt (Circular base with conical roof for high wind resistance)
+ * 6. Hexagonal Pod (6-sided base with faceted pyramid roof for modular clustering)
+ * 7. Lean-to / Sloped (Single-pitch mono-slope for rapid assembly)
+ * 8. Butterfly Roof (Inverted-V roof for rainwater harvesting in monsoon zones)
  */
 export function calculateShapeGeometry(geometry: ShelterGeometry): ShapeGeometryMetrics {
   const shape = resolveArchitecturalShape(geometry);
@@ -76,8 +89,58 @@ export function calculateShapeGeometry(geometry: ShelterGeometry): ShapeGeometry
   let peakHeight = H;
 
   switch (shape) {
+    // 1. STANDARD CUBOID (Baseline)
+    case 'standard_cuboid':
+    case 'flat_box': {
+      apexRise = 0;
+      eavesHeight = H;
+      peakHeight = H + 0.45; // 450mm parapet
+      roofArea = (L + 2 * overhang) * (W + 2 * overhang);
+      // Perimeter walls plus 450mm parapet wall rim
+      grossWallArea = 2 * (L + W) * H + 2 * (L + W) * 0.45;
+      internalVolume = L * W * H;
+      shapeSolarFactor = 1.0;
+      break;
+    }
+
+    // 2. A-FRAME / PITCHED (Steep triangular roof reaching the ground)
+    case 'a_frame_pitched':
     case 'pitched_a_frame': {
-      // Pitched / A-frame roof with triangular gables
+      // Pure A-Frame: Roof rafters land directly on ground plinth (zero longitudinal side walls)
+      // Ideal for high snow & mountain zones: steep angle sheds snow immediately
+      const pitchDeg = Number.isFinite(geometry.roofPitchDegrees) && geometry.roofPitchDegrees >= 30
+        ? geometry.roofPitchDegrees
+        : 45; // default steep 45° for A-frame
+      const pitchRad = (pitchDeg * Math.PI) / 180;
+      // Roof reaches peak height H (or calculated from pitch if requested)
+      const calculatedApex = (W / 2) * Math.tan(pitchRad);
+      const effectiveApex = Math.max(H, calculatedApex);
+      apexRise = effectiveApex;
+      eavesHeight = 0; // Roof touches ground plinth
+      peakHeight = effectiveApex;
+
+      // Rafter slope length from ground to peak
+      const rafterSlope = Math.sqrt(Math.pow(W / 2, 2) + Math.pow(effectiveApex, 2));
+      const extendedRafter = rafterSlope + overhang;
+      const extendedRidge = L + 2 * overhang;
+
+      // Sloped roof covers both sides completely
+      roofArea = 2 * extendedRafter * extendedRidge;
+
+      // Walls: Zero longitudinal side walls! Only 2 triangular gable end walls
+      const gableAreaPerEnd = 0.5 * W * effectiveApex;
+      grossWallArea = 2 * gableAreaPerEnd; // = W * effectiveApex
+
+      // Volume of triangular prism: 0.5 * base * height * length
+      internalVolume = 0.5 * W * effectiveApex * L;
+
+      // High snow shedding, oblique solar reflection
+      shapeSolarFactor = 0.86;
+      break;
+    }
+
+    // 3. GABLED ROOF CUBOID (Standard vertical walls with pitched roof)
+    case 'gabled_cuboid': {
       const pitchDeg = Number.isFinite(geometry.roofPitchDegrees) && geometry.roofPitchDegrees > 0
         ? geometry.roofPitchDegrees
         : 26;
@@ -86,62 +149,104 @@ export function calculateShapeGeometry(geometry: ShelterGeometry): ShapeGeometry
       eavesHeight = H;
       peakHeight = H + apexRise;
 
-      // Rafter slope length with overhang extension
       const rafterHalfSpan = (W / 2) / Math.cos(pitchRad);
       const extendedRafter = rafterHalfSpan + overhang;
       const extendedRidgeLength = L + 2 * overhang;
 
-      // Sloping roof area (2 pitches)
       roofArea = 2 * extendedRafter * extendedRidgeLength;
 
-      // Walls: 2 longitudinal walls (L * H) + 2 end walls with triangular gables (W * H + 0.5 * W * apexRise)
+      // 2 longitudinal walls + 2 end walls with triangular gables
       const gableAreaPerEnd = 0.5 * W * apexRise;
       grossWallArea = 2 * (L * H) + 2 * (W * H + gableAreaPerEnd);
 
-      // Volume: box portion + triangular prism attic
-      const boxVolume = L * W * H;
-      const atticVolume = 0.5 * W * apexRise * L;
-      internalVolume = boxVolume + atticVolume;
-
-      // Solar exposure factor: Pitched roof faces solar trajectory at angle
+      // Volume: orthogonal box + triangular attic prism
+      internalVolume = (L * W * H) + (0.5 * W * apexRise * L);
       shapeSolarFactor = 0.92;
       break;
     }
 
+    // 4. DOME / VAULTED (Hemispherical structure - Minimizes solar gain, ideal for deserts)
+    case 'dome_vaulted':
     case 'vaulted_dome': {
-      // Arched catenary / barrel vault or dome geometry
-      // Lower knee walls (40% height) with self-supporting compressive arch rise (60% height)
-      const kneeHeight = Math.max(1.2, H * 0.4);
-      const archRise = Math.max(1.2, H * 0.6);
-      apexRise = archRise;
-      eavesHeight = kneeHeight;
-      peakHeight = kneeHeight + archRise;
+      // Equivalent hemisphere based on base footprint
+      const eqRadius = Math.sqrt((L * W) / Math.PI);
+      const domeRise = Math.max(1.5, Math.min(H * 1.1, eqRadius * 1.1));
+      apexRise = domeRise;
+      eavesHeight = 0.4; // Low perimeter ring beam / skirt
+      peakHeight = eavesHeight + domeRise;
 
-      // Ramanujan approximation for semi-elliptic / parabolic arc length
-      // Arc length spanning width W with rise archRise
-      const hParam = Math.pow((W / 2 - archRise) / (W / 2 + archRise), 2);
-      const approxArcLength = Math.PI * ((W / 2 + archRise) / 2) * (1 + (3 * hParam) / (10 + Math.sqrt(4 - 3 * hParam)));
+      // Surface area of oblate/prolate hemispherical dome cap (approximated via ellipse of revolution)
+      // A_dome ≈ 2 * π * R_eff^2
+      const rEff = (L + W) / 4;
+      // Roof/Dome shell area with small base overhang
+      roofArea = 2 * Math.PI * Math.pow(rEff + overhang * 0.5, 2) * (domeRise / rEff);
 
-      roofArea = (approxArcLength + 2 * overhang) * (L + 2 * overhang);
+      // Low perimeter curb / perimeter wall (400mm high plinth skirt)
+      const perimeter = Math.PI * (3 * (L / 2 + W / 2) - Math.sqrt((3 * L / 2 + W / 2) * (L / 2 + 3 * W / 2)));
+      grossWallArea = perimeter * eavesHeight;
 
-      // Gable ends (parabolic arch area = 2/3 * W * archRise)
-      const archEndArea = (2 / 3) * W * archRise;
-      const endWallArea = 2 * (W * kneeHeight + archEndArea);
-      const sideWallArea = 2 * (L * kneeHeight);
-      grossWallArea = sideWallArea + endWallArea;
+      // Volume of hemispherical cap: (2/3) * π * a * b * c
+      internalVolume = (2 / 3) * Math.PI * (L / 2) * (W / 2) * domeRise + (floorArea * eavesHeight);
 
-      // Volume: knee wall box + parabolic vault
-      internalVolume = (L * W * kneeHeight) + (L * archEndArea);
-
-      // Crucial thermodynamic advantage: Vaulted dome minimizes solar gain at peak noon
-      // because the curved tangent reflects oblique rays (diffused incidence)
-      shapeSolarFactor = 0.78;
+      // Drastically lower SA/V ratio and diffuse solar reflection at noon
+      shapeSolarFactor = 0.72;
       break;
     }
 
+    // 5. CYLINDRICAL / YURT (Circular base with conical roof - High wind resistance)
+    case 'cylindrical_yurt': {
+      // Radius matching floor area: π * R^2 = L * W
+      const radius = Math.sqrt((L * W) / Math.PI);
+      const wallH = H * 0.75;
+      const coneRise = Math.max(0.7, H * 0.45);
+      apexRise = coneRise;
+      eavesHeight = wallH;
+      peakHeight = wallH + coneRise;
+
+      // Conical roof slant height with overhang
+      const coneSlant = Math.sqrt(Math.pow(radius + overhang, 2) + Math.pow(coneRise, 2));
+      roofArea = Math.PI * (radius + overhang) * coneSlant;
+
+      // Cylindrical vertical wall area: 2 * π * R * H_wall
+      grossWallArea = 2 * Math.PI * radius * wallH;
+
+      // Volume: cylinder volume + cone volume
+      internalVolume = Math.PI * Math.pow(radius, 2) * wallH + (1 / 3) * Math.PI * Math.pow(radius, 2) * coneRise;
+
+      // Aerodynamic shape deflects wind seamlessly and spreads solar radiation around circumference
+      shapeSolarFactor = 0.80;
+      break;
+    }
+
+    // 6. HEXAGONAL POD (6-sided base with faceted roof - Excellent for modular clustering)
+    case 'hexagonal_pod': {
+      // Regular hexagon matching floor area: A = (3 * sqrt(3) / 2) * s^2 => s = sqrt(2 * A / (3 * sqrt(3)))
+      const side = Math.sqrt((2 * floorArea) / (3 * Math.sqrt(3)));
+      const wallH = H * 0.80;
+      const pyramidRise = Math.max(0.6, H * 0.38);
+      apexRise = pyramidRise;
+      eavesHeight = wallH;
+      peakHeight = wallH + pyramidRise;
+
+      // 6 Faceted vertical walls
+      grossWallArea = 6 * side * wallH;
+
+      // 6 Faceted pyramid roof with overhang
+      const inRadius = side * (Math.sqrt(3) / 2);
+      const facetSlant = Math.sqrt(Math.pow(inRadius + overhang, 2) + Math.pow(pyramidRise, 2));
+      const extendedSide = side + 1.15 * overhang;
+      roofArea = 6 * (0.5 * extendedSide * facetSlant);
+
+      // Volume: Hexagonal prism + Hexagonal pyramid
+      internalVolume = floorArea * wallH + (1 / 3) * floorArea * pyramidRise;
+
+      shapeSolarFactor = 0.84;
+      break;
+    }
+
+    // 7. LEAN-TO / SLOPED (Single-pitch sloped roof - Simplest rapid-assembly structure)
+    case 'lean_to_sloped':
     case 'lean_to': {
-      // Mono-pitch sloped shelter (rapid assembly, directional drainage)
-      // Slopes from high wall to low wall
       const slopeAngleDeg = 14;
       const slopeAngleRad = (slopeAngleDeg * Math.PI) / 180;
       const heightDelta = W * Math.tan(slopeAngleRad);
@@ -161,19 +266,44 @@ export function calculateShapeGeometry(geometry: ShelterGeometry): ShapeGeometry
       grossWallArea = 2 * (W * avgWallH) + (L * highWall) + (L * lowWall);
 
       internalVolume = L * W * avgWallH;
-      shapeSolarFactor = 0.95;
+      shapeSolarFactor = 0.94;
       break;
     }
 
-    case 'flat_box':
+    // 8. BUTTERFLY ROOF (Inverted V-roof - Designed for rainwater harvesting in heavy monsoon zones)
+    case 'butterfly_roof': {
+      // Inverted pitch: eaves are elevated, center ridge is a low valley gutter channel
+      const butterflyPitchDeg = 18;
+      const pitchRad = (butterflyPitchDeg * Math.PI) / 180;
+      const eavesRise = (W / 2) * Math.tan(pitchRad);
+      const valleyHeight = H;
+      const elevatedEaves = H + eavesRise;
+
+      apexRise = eavesRise;
+      eavesHeight = elevatedEaves; // high eaves
+      peakHeight = elevatedEaves;
+
+      // Two inward-sloping planes meeting at central valley
+      const halfRafter = (W / 2) / Math.cos(pitchRad) + overhang;
+      roofArea = 2 * halfRafter * (L + 2 * overhang);
+
+      // 2 elevated longitudinal walls + 2 end walls with inverted V gables
+      // Inverted gable area = W * H + 2 * (0.5 * (W/2) * eavesRise) = W*H + 0.5*W*eavesRise
+      grossWallArea = 2 * (L * elevatedEaves) + 2 * (W * valleyHeight + 0.5 * W * eavesRise);
+
+      // Volume: base box + triangular upper inverted space
+      internalVolume = (L * W * valleyHeight) + (0.5 * W * eavesRise * L);
+
+      // Central valley gutter concentrates rainwater collection and allows clerestory high vents
+      shapeSolarFactor = 0.90;
+      break;
+    }
+
     default: {
-      // Standard rectangular prism baseline with 450mm parapet perimeter
       apexRise = 0;
       eavesHeight = H;
-      peakHeight = H + 0.45; // including parapet
+      peakHeight = H + 0.45;
       roofArea = (L + 2 * overhang) * (W + 2 * overhang);
-
-      // Gross wall area including 450mm parapet
       grossWallArea = 2 * (L + W) * H + 2 * (L + W) * 0.45;
       internalVolume = L * W * H;
       shapeSolarFactor = 1.0;
@@ -256,13 +386,38 @@ export function calculateBillOfQuantities(
   // 3. Roof Assembly Weathering Deck
   const roofRate = roofMaterial.costPerSquareMeterINR || 650;
   const roofCarbon = roofMaterial.embodiedCarbonKgCo2PerM2 || 35;
-  const shapeRoofLabel = geom.shape === 'vaulted_dome'
-    ? 'Vaulted Arch Shell'
-    : geom.shape === 'pitched_a_frame'
-    ? 'Dual-Pitch Sloped Weathering Skin'
-    : geom.shape === 'lean_to'
-    ? 'Mono-Pitch Rafter Deck'
-    : 'Terraced Flat Deck';
+  let shapeRoofLabel = 'Terraced Flat Deck';
+  switch (geom.shape) {
+    case 'dome_vaulted':
+    case 'vaulted_dome':
+      shapeRoofLabel = 'Hemispherical Compression Arch Shell';
+      break;
+    case 'a_frame_pitched':
+    case 'pitched_a_frame':
+      shapeRoofLabel = 'Ground-to-Ridge Dual-Slope Rafter Skin';
+      break;
+    case 'gabled_cuboid':
+      shapeRoofLabel = 'Dual-Pitch Sloped Weathering Skin';
+      break;
+    case 'cylindrical_yurt':
+      shapeRoofLabel = 'Conical Weathering Roof & Aerodynamic Ring';
+      break;
+    case 'hexagonal_pod':
+      shapeRoofLabel = '6-Faceted Modular Pyramid Roof';
+      break;
+    case 'lean_to_sloped':
+    case 'lean_to':
+      shapeRoofLabel = 'Mono-Pitch Rafter Deck';
+      break;
+    case 'butterfly_roof':
+      shapeRoofLabel = 'Inverted-V Rainwater Harvesting Wing Deck';
+      break;
+    case 'standard_cuboid':
+    case 'flat_box':
+    default:
+      shapeRoofLabel = 'Terraced Parapet Flat Deck';
+      break;
+  }
 
   items.push({
     id: 'boq_roof',
@@ -317,21 +472,45 @@ export function calculateBillOfQuantities(
   let framingCarbon = 0;
 
   switch (geom.shape) {
+    case 'a_frame_pitched':
     case 'pitched_a_frame':
+      framingDesc = 'Ground-Anchored A-Frame Rafters, Collar Ties & Base Footings';
+      framingRate = 450;
+      framingCarbon = 19;
+      break;
+    case 'gabled_cuboid':
       framingDesc = 'Timber King-Post Truss, Tie Beams & Roof Purlins';
       framingRate = 420;
       framingCarbon = 18;
       break;
+    case 'dome_vaulted':
     case 'vaulted_dome':
-      framingDesc = 'Arched Centering Formwork, Compressive Tie Rods & Abutments';
+      framingDesc = 'Geodesic Struts, Arched Centering Formwork & Abutments';
       framingRate = 380;
       framingCarbon = 14;
       break;
+    case 'cylindrical_yurt':
+      framingDesc = 'Tension Crown Ring, Radial Rafters & Trellis Khana Lath';
+      framingRate = 360;
+      framingCarbon = 13;
+      break;
+    case 'hexagonal_pod':
+      framingDesc = 'Hexagonal Space Frame, Corner Brackets & Facet Rafters';
+      framingRate = 390;
+      framingCarbon = 15;
+      break;
+    case 'lean_to_sloped':
     case 'lean_to':
       framingDesc = 'Single-Rake Rafter Poles, Eaves Fascia & Gutter Channel';
       framingRate = 220;
       framingCarbon = 11;
       break;
+    case 'butterfly_roof':
+      framingDesc = 'Inverted Strut Trusses, Valley Gutter Flashing & Rain Downspout';
+      framingRate = 460;
+      framingCarbon = 20;
+      break;
+    case 'standard_cuboid':
     case 'flat_box':
     default:
       framingDesc = 'Reinforced Slab Shuttering, Parapet Coping & Eaves Band';
