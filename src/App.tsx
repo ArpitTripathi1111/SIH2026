@@ -148,6 +148,7 @@ export default function App() {
               climate={climate}
               results={simulationResults}
               onDesignChange={setDesign}
+              onRegionChange={handleRegionChange}
             />
 
             {/* Statutory Indian Government Standards Compliance Engine (ECBC • NDMA • IMAC • NBC) */}

@@ -13,7 +13,7 @@
  * 8. Butterfly Roof: Inverted V-roof (Monsoon Rainwater Harvesting)
  */
 
-import React, { useRef } from 'react';
+import React, { useRef, useMemo, useState } from 'react';
 import {
   Square,
   Triangle,
@@ -205,10 +205,246 @@ export const ARCHITECTURAL_SHAPES: ShapeCardData[] = [
   }
 ];
 
+export interface ArchetypeAffinity {
+  isRecommended: boolean;
+  badge: string;
+  badgeBg: string;
+  badgeBorder: string;
+  badgeText: string;
+  regionalAdvantage: string;
+  suitabilityScore: number;
+}
+
+export const ARCHETYPE_SUITABILITY: Record<RegionId, Record<string, ArchetypeAffinity>> = {
+  river: {
+    butterfly_roof: {
+      isRecommended: true,
+      badge: '★ Top Pick: River Monsoon Catchment',
+      badgeBg: 'bg-cyan-600',
+      badgeBorder: 'border-cyan-700',
+      badgeText: 'text-white',
+      regionalAdvantage: 'Inverted-V channels 100% monsoon rainfall into storage; high clerestory vents humid air.',
+      suitabilityScore: 1
+    },
+    lean_to_sloped: {
+      isRecommended: true,
+      badge: '★ Top Pick: Rapid River Assembly',
+      badgeBg: 'bg-emerald-600',
+      badgeBorder: 'border-emerald-700',
+      badgeText: 'text-white',
+      regionalAdvantage: 'Unidirectional single-slope rafter allows fastest deployment in flood relief zones.',
+      suitabilityScore: 2
+    },
+    cylindrical_yurt: {
+      isRecommended: true,
+      badge: '★ Recommended: River Cyclone Deflector',
+      badgeBg: 'bg-teal-600',
+      badgeBorder: 'border-teal-700',
+      badgeText: 'text-white',
+      regionalAdvantage: '360° circular profile deflects intense seasonal riverbank and coastal gale gusts (Cd ~0.50).',
+      suitabilityScore: 3
+    },
+    standard_cuboid: {
+      isRecommended: true,
+      badge: 'River Stilt Plinth Base',
+      badgeBg: 'bg-blue-600',
+      badgeBorder: 'border-blue-700',
+      badgeText: 'text-white',
+      regionalAdvantage: 'Elevated on bamboo/concrete stilt plinth above flood dampness with maximum usable floor.',
+      suitabilityScore: 4
+    },
+    hexagonal_pod: {
+      isRecommended: true,
+      badge: 'Modular Relief Cluster',
+      badgeBg: 'bg-purple-600',
+      badgeBorder: 'border-purple-700',
+      badgeText: 'text-white',
+      regionalAdvantage: 'Zero-gap tessellation enables rapid community field hospital and temporary camp layout.',
+      suitabilityScore: 5
+    },
+    gabled_cuboid: {
+      isRecommended: false,
+      badge: 'High-Rain Drainage',
+      badgeBg: 'bg-slate-700',
+      badgeBorder: 'border-slate-800',
+      badgeText: 'text-slate-100',
+      regionalAdvantage: 'Dual-pitch timber trusses shed heavy monsoon rainfall away from exterior walls.',
+      suitabilityScore: 6
+    },
+    a_frame_pitched: {
+      isRecommended: false,
+      badge: 'Steep Runoff / Narrow Plinth',
+      badgeBg: 'bg-slate-600',
+      badgeBorder: 'border-slate-700',
+      badgeText: 'text-slate-200',
+      regionalAdvantage: 'Ground-reaching rafters provide steep runoff but restrict lateral stilt elevation.',
+      suitabilityScore: 7
+    },
+    dome_vaulted: {
+      isRecommended: false,
+      badge: 'Requires Impervious Membrane',
+      badgeBg: 'bg-slate-600',
+      badgeBorder: 'border-slate-700',
+      badgeText: 'text-slate-200',
+      regionalAdvantage: 'Curved shell requires elastomeric waterproofing to prevent humid rain moisture ingress.',
+      suitabilityScore: 8
+    }
+  },
+  mountain: {
+    a_frame_pitched: {
+      isRecommended: true,
+      badge: '★ Top Pick: Mountain Snow Shedding',
+      badgeBg: 'bg-indigo-600',
+      badgeBorder: 'border-indigo-700',
+      badgeText: 'text-white',
+      regionalAdvantage: 'Ground-to-ridge steep rafters eliminate vertical side walls and shed snow immediately.',
+      suitabilityScore: 1
+    },
+    gabled_cuboid: {
+      isRecommended: true,
+      badge: '★ Top Pick: Alpine Attic Buffer',
+      badgeBg: 'bg-blue-600',
+      badgeBorder: 'border-blue-700',
+      badgeText: 'text-white',
+      regionalAdvantage: 'Dual-pitch timber trusses with ventilated attic buffer preventing sub-zero freeze shock.',
+      suitabilityScore: 2
+    },
+    standard_cuboid: {
+      isRecommended: true,
+      badge: 'Compact Thermal Box',
+      badgeBg: 'bg-slate-700',
+      badgeBorder: 'border-slate-800',
+      badgeText: 'text-slate-100',
+      regionalAdvantage: 'Minimal envelope surface area with heavy perimeter insulation for interior heat retention.',
+      suitabilityScore: 3
+    },
+    hexagonal_pod: {
+      isRecommended: true,
+      badge: 'Alpine Structural Rigid Pod',
+      badgeBg: 'bg-purple-600',
+      badgeBorder: 'border-purple-700',
+      badgeText: 'text-white',
+      regionalAdvantage: 'Triangulated facets resist intense Himalayan mountain winds and lateral snow drifts.',
+      suitabilityScore: 4
+    },
+    cylindrical_yurt: {
+      isRecommended: false,
+      badge: 'Aerodynamic Wind Defense',
+      badgeBg: 'bg-teal-600',
+      badgeBorder: 'border-teal-700',
+      badgeText: 'text-white',
+      regionalAdvantage: 'Radial rafters deflect gale winds; requires thick felt insulation against freezing night air.',
+      suitabilityScore: 5
+    },
+    lean_to_sloped: {
+      isRecommended: false,
+      badge: 'Mono-Pitch Ridge',
+      badgeBg: 'bg-slate-600',
+      badgeBorder: 'border-slate-700',
+      badgeText: 'text-slate-200',
+      regionalAdvantage: 'Single pitch requires sturdy windward snow barrier to prevent structural drift collapse.',
+      suitabilityScore: 6
+    },
+    dome_vaulted: {
+      isRecommended: false,
+      badge: 'High Thermal Mass Arch',
+      badgeBg: 'bg-amber-600',
+      badgeBorder: 'border-amber-700',
+      badgeText: 'text-white',
+      regionalAdvantage: 'High compressive strength but lacks attic thermal buffer in sub-zero regimes.',
+      suitabilityScore: 7
+    },
+    butterfly_roof: {
+      isRecommended: false,
+      badge: 'Snow Drift Hazard in Valley',
+      badgeBg: 'bg-rose-700',
+      badgeBorder: 'border-rose-800',
+      badgeText: 'text-white',
+      regionalAdvantage: 'Valley gutter will accumulate dangerous heavy snow drifts; not recommended for alpine zones.',
+      suitabilityScore: 8
+    }
+  },
+  desert: {
+    dome_vaulted: {
+      isRecommended: true,
+      badge: '★ Top Pick: Desert Solar Heat Minimizer',
+      badgeBg: 'bg-amber-600',
+      badgeBorder: 'border-amber-700',
+      badgeText: 'text-white',
+      regionalAdvantage: 'Catenary dome shell diffuses overhead midday sun; lowest mathematical S/V ratio (-20% heat gain).',
+      suitabilityScore: 1
+    },
+    standard_cuboid: {
+      isRecommended: true,
+      badge: '★ Top Pick: Thermal Mass Flat Box',
+      badgeBg: 'bg-yellow-600',
+      badgeBorder: 'border-yellow-700',
+      badgeText: 'text-white',
+      regionalAdvantage: '350mm thick masonry thermal mass with 450mm parapet wall creates 8.2h thermal lag and night terrace cooling.',
+      suitabilityScore: 2
+    },
+    hexagonal_pod: {
+      isRecommended: true,
+      badge: 'Compact Shaded Cluster',
+      badgeBg: 'bg-purple-600',
+      badgeBorder: 'border-purple-700',
+      badgeText: 'text-white',
+      regionalAdvantage: 'Cluster geometry creates mutual facade shading and microclimate courtyard air wells.',
+      suitabilityScore: 3
+    },
+    cylindrical_yurt: {
+      isRecommended: true,
+      badge: 'Sandstorm Aerodynamic Shell',
+      badgeBg: 'bg-teal-600',
+      badgeBorder: 'border-teal-700',
+      badgeText: 'text-white',
+      regionalAdvantage: 'Smooth circular form prevents sand dune accumulation and deflecting dust storms.',
+      suitabilityScore: 4
+    },
+    lean_to_sloped: {
+      isRecommended: false,
+      badge: 'Shading Overhang Lean-To',
+      badgeBg: 'bg-slate-600',
+      badgeBorder: 'border-slate-700',
+      badgeText: 'text-slate-200',
+      regionalAdvantage: 'High windward wall needs deep solar shading chhajjas to prevent excessive thermal penetration.',
+      suitabilityScore: 5
+    },
+    gabled_cuboid: {
+      isRecommended: false,
+      badge: 'Temperate Design',
+      badgeBg: 'bg-slate-600',
+      badgeBorder: 'border-slate-700',
+      badgeText: 'text-slate-200',
+      regionalAdvantage: 'Attic traps significant desert afternoon heat unless exhaustively ventilated.',
+      suitabilityScore: 6
+    },
+    butterfly_roof: {
+      isRecommended: false,
+      badge: 'Limited Rainfall in Arid Zone',
+      badgeBg: 'bg-slate-600',
+      badgeBorder: 'border-slate-700',
+      badgeText: 'text-slate-200',
+      regionalAdvantage: 'Exposes high clerestory glass to harsh desert glare and dust storms.',
+      suitabilityScore: 7
+    },
+    a_frame_pitched: {
+      isRecommended: false,
+      badge: 'Excessive Roof Solar Absorption',
+      badgeBg: 'bg-slate-600',
+      badgeBorder: 'border-slate-700',
+      badgeText: 'text-slate-200',
+      regionalAdvantage: 'Large angled roof surface collects excessive daytime solar radiation in hyper-arid plains.',
+      suitabilityScore: 8
+    }
+  }
+};
+
 export interface ShapeSelectorProps {
   selectedShape: ArchitecturalShape;
   onSelectShape: (shape: ArchitecturalShape) => void;
   currentGeometry?: ShelterGeometry;
+  activeArchetype?: RegionId;
   compact?: boolean;
   readOnly?: boolean;
   className?: string;
@@ -219,12 +455,14 @@ export const ShapeSelector: React.FC<ShapeSelectorProps> = ({
   selectedShape,
   onSelectShape,
   currentGeometry,
+  activeArchetype = 'mountain',
   compact = false,
   readOnly = false,
   className = '',
   showComparisonDetails = true
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [filterMode, setFilterMode] = useState<'all' | 'recommended'>('all');
 
   const activeShape = resolveArchitecturalShape({
     ...(currentGeometry || {
@@ -253,6 +491,38 @@ export const ShapeSelector: React.FC<ShapeSelectorProps> = ({
     ? calculateShapeGeometry({ ...currentGeometry, architecturalShape: activeShape })
     : null;
 
+  // Dynamically map the 8 architectural forms based on activeArchetype
+  const dynamicMappedShapes = useMemo(() => {
+    const regionKey: RegionId = (activeArchetype === 'desert' || activeArchetype === 'river' || activeArchetype === 'mountain')
+      ? activeArchetype
+      : 'mountain';
+    const suitabilityMap = ARCHETYPE_SUITABILITY[regionKey] || ARCHETYPE_SUITABILITY.mountain;
+
+    const enriched = ARCHITECTURAL_SHAPES.map((shape) => {
+      const affinity = suitabilityMap[shape.id] || {
+        isRecommended: false,
+        badge: shape.bestFor,
+        badgeBg: 'bg-slate-700',
+        badgeBorder: 'border-slate-800',
+        badgeText: 'text-white',
+        regionalAdvantage: shape.structuralAdvantage,
+        suitabilityScore: 10
+      };
+      return {
+        ...shape,
+        affinity
+      };
+    });
+
+    // Sort so top recommended forms for active archetype appear first
+    const sorted = [...enriched].sort((a, b) => a.affinity.suitabilityScore - b.affinity.suitabilityScore);
+
+    if (filterMode === 'recommended') {
+      return sorted.filter((s) => s.affinity.isRecommended);
+    }
+    return sorted;
+  }, [activeArchetype, filterMode]);
+
   const handleScroll = (direction: 'left' | 'right') => {
     if (scrollRef.current) {
       const scrollAmount = direction === 'left' ? -320 : 320;
@@ -260,31 +530,84 @@ export const ShapeSelector: React.FC<ShapeSelectorProps> = ({
     }
   };
 
+  const archetypeMeta = useMemo(() => {
+    if (activeArchetype === 'river') {
+      return {
+        name: 'River Basin Archetype',
+        sub: 'Warm & Humid / Gangetic Plains',
+        color: 'text-emerald-700 bg-emerald-50 border-emerald-200',
+        highlight: 'Focus: Monsoon Harvesting, Elevated Stilt Flood Defenses & Passive Cross-Ventilation'
+      };
+    }
+    if (activeArchetype === 'desert') {
+      return {
+        name: 'Desert Archetype',
+        sub: 'Hot & Dry / Thar Desert',
+        color: 'text-amber-700 bg-amber-50 border-amber-200',
+        highlight: 'Focus: Solar Gain Minimization, High Thermal Mass & Catenary Vaulting'
+      };
+    }
+    return {
+      name: 'Mountain Archetype',
+      sub: 'Cold & Arid / Ladakh Highlands',
+      color: 'text-indigo-700 bg-indigo-50 border-indigo-200',
+      highlight: 'Focus: Steep Snow Shedding, Structural Ridge Rigidity & Attic Cold Buffers'
+    };
+  }, [activeArchetype]);
+
   return (
     <div
       id="shape-selector-container"
       className={`bg-white border border-slate-200 rounded-xl p-3 sm:p-4 shadow-xs ${className}`}
     >
       {/* Header bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 mb-3 border-b border-slate-100">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 mb-2.5 border-b border-slate-100">
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-lg bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-700 shadow-xs">
             <Sliders className="w-4 h-4" />
           </div>
           <div>
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900 flex items-center gap-2">
-              8 Architectural Forms
-              <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-200">
-                SIH26051 Computational Engine
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900 flex items-center gap-2">
+                8 Architectural Forms
+              </h3>
+              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${archetypeMeta.color}`}>
+                {archetypeMeta.name}
               </span>
-            </h3>
-            <p className="text-[11px] text-slate-500">
-              Select geometry to synchronize SA/V ratio, solar irradiance angle, indoor comfort, and itemized BOQ quantities.
+            </div>
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              {archetypeMeta.highlight}
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Quick Filter: All vs Recommended */}
+          <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-xs">
+            <button
+              type="button"
+              onClick={() => setFilterMode('all')}
+              className={`px-2 py-0.5 rounded text-[10px] font-semibold transition-all ${
+                filterMode === 'all'
+                  ? 'bg-white text-slate-900 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              All (8)
+            </button>
+            <button
+              type="button"
+              onClick={() => setFilterMode('recommended')}
+              className={`px-2 py-0.5 rounded text-[10px] font-semibold transition-all ${
+                filterMode === 'recommended'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Top Picks
+            </button>
+          </div>
+
           {activeMetrics && (
             <div className="flex items-center gap-2 text-[11px] font-mono bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1 text-slate-700">
               <span className="text-slate-500">SA/V:</span>
@@ -317,15 +640,16 @@ export const ShapeSelector: React.FC<ShapeSelectorProps> = ({
         </div>
       </div>
 
-      {/* Horizontal Scrolling Array of 8 Toggle Cards */}
+      {/* Horizontal Scrolling Array of Toggle Cards (Dynamically mapped to Archetype) */}
       <div
         ref={scrollRef}
         className="flex gap-3 overflow-x-auto pb-2 scroll-smooth scrollbar-thin scrollbar-thumb-slate-200 snap-x snap-mandatory"
         style={{ scrollbarGutter: 'stable' }}
       >
-        {ARCHITECTURAL_SHAPES.map((shape) => {
+        {dynamicMappedShapes.map((shape) => {
           const isSelected = activeShape === shape.id;
           const Icon = shape.icon;
+          const isRec = shape.affinity.isRecommended;
 
           // Compute individual shape metrics
           const comparisonMetrics = currentGeometry
@@ -339,19 +663,23 @@ export const ShapeSelector: React.FC<ShapeSelectorProps> = ({
               type="button"
               disabled={readOnly}
               onClick={() => onSelectShape(shape.id)}
-              className={`relative flex-none w-[260px] sm:w-[280px] snap-start text-left p-3.5 rounded-xl border transition-all flex flex-col justify-between ${
+              className={`relative flex-none w-[270px] sm:w-[290px] snap-start text-left p-3.5 rounded-xl border transition-all flex flex-col justify-between ${
                 isSelected
-                  ? 'border-blue-600 bg-blue-50/50 ring-2 ring-blue-600/20 shadow-sm'
+                  ? 'border-blue-600 bg-blue-50/60 ring-2 ring-blue-600/30 shadow-md'
+                  : isRec
+                  ? 'border-slate-300 bg-slate-50/40 hover:border-slate-400 hover:bg-white'
                   : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50/60'
               } ${readOnly ? 'cursor-default opacity-80' : 'cursor-pointer'}`}
             >
-              {/* Card Header: Radio indicator, Title, Best For Badge */}
+              {/* Card Header: Regional Archetype Badge & Icon */}
               <div>
                 <div className="flex items-center justify-between gap-1.5 mb-2">
                   <span
-                    className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold tracking-tight shadow-xs ${shape.bestForColor}`}
+                    className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold tracking-tight shadow-xs ${
+                      shape.affinity.badgeBg
+                    } ${shape.affinity.badgeText} border ${shape.affinity.badgeBorder}`}
                   >
-                    {shape.bestFor}
+                    {shape.affinity.badge}
                   </span>
 
                   <div
@@ -383,8 +711,10 @@ export const ShapeSelector: React.FC<ShapeSelectorProps> = ({
                   </div>
                 </div>
 
-                <p className="text-[10px] text-slate-500 leading-relaxed mb-2.5 line-clamp-2">
-                  {shape.description}
+                {/* Regional Suitability Note */}
+                <p className="text-[10px] text-slate-600 leading-relaxed mt-1 mb-2 line-clamp-2 bg-slate-100/70 p-1.5 rounded border border-slate-200/60">
+                  <strong className="text-slate-800 font-medium">Regional Fit: </strong>
+                  {shape.affinity.regionalAdvantage}
                 </p>
               </div>
 

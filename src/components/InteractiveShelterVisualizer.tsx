@@ -49,11 +49,52 @@ import {
 
 export type VisualizerViewMode = 'front' | 'side' | 'top' | '3d';
 
+export interface ArchetypeButtonDef {
+  id: RegionId;
+  label: string;
+  subLabel: string;
+  icon: React.ComponentType<{ className?: string }>;
+  title: string;
+  activeClass: string;
+  iconClass: string;
+}
+
+export const ARCHETYPE_OPTIONS: ArchetypeButtonDef[] = [
+  {
+    id: 'mountain',
+    label: 'Mountain',
+    subLabel: 'Cold & Arid',
+    icon: Mountain,
+    title: 'Snap to Ladakh Mountain baseline (Cold & Arid)',
+    activeClass: 'bg-sky-600 text-white shadow-sm border-sky-500',
+    iconClass: 'text-sky-200'
+  },
+  {
+    id: 'desert',
+    label: 'Desert',
+    subLabel: 'Hot & Dry',
+    icon: SunMedium,
+    title: 'Snap to Thar Desert baseline (Hot & Dry)',
+    activeClass: 'bg-amber-600 text-white shadow-sm border-amber-500',
+    iconClass: 'text-amber-200'
+  },
+  {
+    id: 'river',
+    label: 'River',
+    subLabel: 'Warm & Humid',
+    icon: Waves,
+    title: 'Snap to Gangetic River Basin baseline (Warm & Humid)',
+    activeClass: 'bg-emerald-600 text-white shadow-sm border-emerald-500',
+    iconClass: 'text-emerald-200'
+  }
+];
+
 export interface InteractiveShelterVisualizerProps {
   design?: ShelterDesign;
   climate?: ClimateData;
   results?: SimulationResults;
   onDesignChange?: (updatedDesign: ShelterDesign) => void;
+  onRegionChange?: (newRegion: RegionId) => void;
   initialRegion?: RegionId;
   readOnlyControls?: boolean;
   initialViewMode?: VisualizerViewMode;
@@ -64,6 +105,7 @@ export const InteractiveShelterVisualizer: React.FC<InteractiveShelterVisualizer
   climate: externalClimate,
   results: externalResults,
   onDesignChange,
+  onRegionChange,
   initialRegion = 'mountain',
   readOnlyControls = false,
   initialViewMode = 'front'
@@ -242,16 +284,19 @@ export const InteractiveShelterVisualizer: React.FC<InteractiveShelterVisualizer
 
   // Notify parent of updates
   const notifyParentTimeout = useRef<number | null>(null);
-  const notifyParentOfChange = (geom: ShelterGeometry) => {
+  const notifyParentOfChange = (geom: ShelterGeometry, targetRegion?: RegionId) => {
     if (!onDesignChange) return;
     if (notifyParentTimeout.current) {
       window.clearTimeout(notifyParentTimeout.current);
     }
+    const resolvedRegion = targetRegion || activeRegion;
+    const resolvedProfile = DEFAULT_CLIMATES[resolvedRegion] || DEFAULT_CLIMATES.mountain;
+
     notifyParentTimeout.current = window.setTimeout(() => {
       const updated: ShelterDesign = {
-        id: externalDesign?.id || `shelter_${activeRegion}_${Date.now()}`,
-        name: externalDesign?.name || `${activeFallbackProfile.name} Shelter`,
-        regionId: activeRegion,
+        id: externalDesign?.id || `shelter_${resolvedRegion}_${Date.now()}`,
+        name: externalDesign?.name || `${resolvedProfile.name} Shelter`,
+        regionId: resolvedRegion,
         createdAtIso: externalDesign?.createdAtIso || new Date().toISOString(),
         geometry: {
           ...geom,
@@ -276,22 +321,23 @@ export const InteractiveShelterVisualizer: React.FC<InteractiveShelterVisualizer
     }, 150);
   };
 
-  // Switch to one of the 3 predefined fallback profiles
-  const handleSnapToProfile = (region: RegionId) => {
+  // Set active archetype with guaranteed state synchronization and parent notification
+  const setActiveArchetype = (region: RegionId) => {
     setActiveRegion(region);
     const profile = DEFAULT_CLIMATES[region];
     const defs = profile.recommendedDefaults;
 
+    // Appropriate default archetype geometry for each zone
     const targetShape: ArchitecturalShape = region === 'mountain'
-      ? 'pitched_a_frame'
+      ? 'a_frame_pitched'
       : region === 'desert'
-      ? 'vaulted_dome'
-      : 'lean_to';
+      ? 'dome_vaulted'
+      : 'butterfly_roof';
 
     setArchitecturalShape(targetShape);
     setWallThicknessMm(defs.wallThicknessMm);
     setWwrPercent(defs.windowToWallRatioPercent);
-    setRoofPitchDeg(defs.roofPitchDegrees || (defs.roofType === 'pitched' ? 24 : 0));
+    setRoofPitchDeg(defs.roofPitchDegrees || (region === 'mountain' ? 45 : region === 'desert' ? 25 : 18));
     setOverhangDepthM(defs.overhangDepthMeters);
     setAirChangesACH(defs.airChangesPerHourACH);
     setInsulationThicknessMm(defs.insulationThicknessMm);
@@ -306,13 +352,25 @@ export const InteractiveShelterVisualizer: React.FC<InteractiveShelterVisualizer
       architecturalShape: targetShape,
       wallThicknessMm: defs.wallThicknessMm,
       windowToWallRatioPercent: defs.windowToWallRatioPercent,
-      roofPitchDegrees: defs.roofPitchDegrees || 0,
+      roofPitchDegrees: defs.roofPitchDegrees || (region === 'mountain' ? 45 : region === 'desert' ? 25 : 18),
       overhangDepthMeters: defs.overhangDepthMeters,
       airChangesPerHourACH: defs.airChangesPerHourACH,
       insulationThicknessMm: defs.insulationThicknessMm,
       roofType: defs.roofType
     };
-    notifyParentOfChange(newGeom);
+
+    // Explicitly pass region to prevent stale closure capturing old activeRegion
+    notifyParentOfChange(newGeom, region);
+
+    // If parent provided onRegionChange callback, synchronize top-level region & climate immediately
+    if (onRegionChange) {
+      onRegionChange(region);
+    }
+  };
+
+  // Backward compatibility alias for handleSnapToProfile
+  const handleSnapToProfile = (region: RegionId) => {
+    setActiveArchetype(region);
   };
 
   // Switch architectural base geometry shape
@@ -548,47 +606,27 @@ export const InteractiveShelterVisualizer: React.FC<InteractiveShelterVisualizer
             <div className="flex items-center gap-1.5 bg-slate-900/90 p-1 rounded-lg border border-slate-700 text-xs">
               <span className="text-[10px] font-mono text-slate-400 px-2 uppercase font-semibold">Archetypes:</span>
               
-              <button
-                type="button"
-                onClick={() => handleSnapToProfile('mountain')}
-                className={`px-2.5 py-1 rounded text-xs font-medium flex items-center gap-1.5 transition-all ${
-                  activeRegion === 'mountain'
-                    ? 'bg-sky-600 text-white shadow-sm'
-                    : 'text-slate-300 hover:text-white hover:bg-slate-800'
-                }`}
-                title="Snap to Ladakh Mountain baseline (Cold & Arid)"
-              >
-                <Mountain className="w-3.5 h-3.5 text-sky-200" />
-                <span>Mountain</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleSnapToProfile('desert')}
-                className={`px-2.5 py-1 rounded text-xs font-medium flex items-center gap-1.5 transition-all ${
-                  activeRegion === 'desert'
-                    ? 'bg-amber-600 text-white shadow-sm'
-                    : 'text-slate-300 hover:text-white hover:bg-slate-800'
-                }`}
-                title="Snap to Thar Desert baseline (Hot & Dry)"
-              >
-                <SunMedium className="w-3.5 h-3.5 text-amber-200" />
-                <span>Desert</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleSnapToProfile('river')}
-                className={`px-2.5 py-1 rounded text-xs font-medium flex items-center gap-1.5 transition-all ${
-                  activeRegion === 'river'
-                    ? 'bg-emerald-600 text-white shadow-sm'
-                    : 'text-slate-300 hover:text-white hover:bg-slate-800'
-                }`}
-                title="Snap to Gangetic River Basin baseline (Warm & Humid)"
-              >
-                <Waves className="w-3.5 h-3.5 text-emerald-200" />
-                <span>River</span>
-              </button>
+              {ARCHETYPE_OPTIONS.map((archetype) => {
+                const isSelected = activeRegion === archetype.id;
+                const IconComp = archetype.icon;
+                return (
+                  <button
+                    key={archetype.id}
+                    id={`archetype-btn-${archetype.id}`}
+                    type="button"
+                    onClick={() => setActiveArchetype(archetype.id)}
+                    className={`px-2.5 py-1 rounded text-xs font-medium flex items-center gap-1.5 transition-all border ${
+                      isSelected
+                        ? archetype.activeClass
+                        : 'text-slate-300 hover:text-white hover:bg-slate-800 border-transparent'
+                    }`}
+                    title={archetype.title}
+                  >
+                    <IconComp className={`w-3.5 h-3.5 ${archetype.iconClass}`} />
+                    <span>{archetype.label}</span>
+                  </button>
+                );
+              })}
             </div>
 
             {/* CAD Toggles */}
@@ -656,6 +694,7 @@ export const InteractiveShelterVisualizer: React.FC<InteractiveShelterVisualizer
             selectedShape={architecturalShape}
             onSelectShape={handleShapeChange}
             currentGeometry={activeGeometry}
+            activeArchetype={activeRegion}
           />
         </div>
       )}
