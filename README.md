@@ -72,10 +72,10 @@ npm run dev
 ## 👥 Team Members
 
 * Arpit Tripathi [Captain]
+* Divyansh Rastogi 
 * Shiv Prakash Mishra
 * Anishka Mishra
 * Dhananjay Kumar Yadav
-* Divyansh Rastogi
 * Himanshu Yadav
 
 ```
